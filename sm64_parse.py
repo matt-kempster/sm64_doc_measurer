@@ -22,6 +22,7 @@ def get_ast_from_file(
         str(filename),
         use_cpp=True,
         cpp_args=[
+            "-DVERSION_US",
             "-D_LANGUAGE_C",
             "-D__attribute__(x)=",
             "-D_Static_assert(a,b)=",
