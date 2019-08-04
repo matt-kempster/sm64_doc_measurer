@@ -72,6 +72,15 @@ class AllSymbols:
 all_symbols = AllSymbols()
 
 
+@dataclass(frozen=True)
+class Statistics:
+    function_counts: Dict[Classification, int]
+    struct_counts: Dict[Classification, int]
+    global_var_counts: Dict[Classification, int]
+    struct_member_counts: Dict[Classification, int]
+    local_var_counts: Dict[Classification, int]
+
+
 # Classification functions
 
 
@@ -82,7 +91,9 @@ def classify_function_name(name: str) -> Classification:
         for prefix in ["func", "unk", "proc8"]  # proc8 is a bit of a hack
     ):
         return Classification.UNDOCUMENTED
-    if lower != name or "80" in name:  # no addresses allowed
+    if lower != name or (
+        "80" in name and not name.startswith("approach")  # no addresses allowed
+    ):
         return Classification.MALFORMED
     return Classification.GOOD
 
@@ -119,14 +130,29 @@ def classify_arg(arg: str) -> Classification:
 
 
 def classify_struct_member(name: str) -> Classification:
-    if name.startswith("unk") or name.startswith("u_") or name.startswith("d_"):
+    if (
+        name.startswith("unk")
+        or name.startswith("u_")
+        or name.startswith("d_")
+        or name == "plane28"
+    ):
         return Classification.UNDOCUMENTED
-    if name.startswith("filler") or name.startswith("pad"):
+    if name[0].isupper() or name.startswith("filler") or name.startswith("pad"):
         return Classification.MALFORMED
     return Classification.GOOD
 
 
 def classify_local_var(name: str) -> Classification:
+    if (
+        (re.match(r"sp[0-9A-Fa-f]+$", name) and name not in ["space", "speed"])
+        or name.startswith("unk")
+        or re.match(r"val[0-9A-Fa-f]*$", name)
+        or re.match(r"[abf][0-9]+$", name)
+        or re.match(r"arg[0-9].*", name)
+    ):
+        return Classification.UNDOCUMENTED
+    if name.startswith("pad") or name.startswith("filler"):
+        return Classification.MALFORMED
     return Classification.GOOD
 
 
@@ -167,7 +193,10 @@ def classify_all_struct_members(node) -> Tuple[ClassifiedSymbol, ...]:
 def classify_global_var(name: str) -> Classification:
     if (
         name.startswith("D_")
-        or re.match(r".*[0-9A-Fa-f]{5,}.*", name) is not None
+        or (
+            re.match(r".*[0-9A-Fa-f]{5,}.*", name)
+            and name != "sBowserPuzzlePieceActions"
+        )
         or (name.startswith("bhv") and name[-1].isdigit())
     ):
         return Classification.UNDOCUMENTED
@@ -193,7 +222,8 @@ class Visitor(NodeVisitor):
 
     def visit_Struct(self, node):
         global all_symbols
-        if not node.name:
+        if not node.name or re.match(r"Dummy[0-9]+$", node.name):
+            # Suppress "Dummy" structs, which are used for bss reordering.
             return
         struct = Struct(
             name=ClassifiedSymbol(node.name, classify_struct_name(node.name)),
@@ -215,35 +245,54 @@ def collect_global_vars(ast: FileAST):
             )
 
 
+# Counting stuff
+
+
+def get_counts(symbols: List[ClassifiedSymbol]) -> Dict[Classification, int]:
+    d: Dict[Classification, int] = defaultdict(int)
+    for symbol in symbols:
+        d[symbol.classification] += 1
+    return d
+
+
+def build_statistics(symbols: AllSymbols) -> Statistics:
+    return Statistics(
+        function_counts=get_counts([function.name for function in symbols.functions]),
+        struct_counts=get_counts([struct.name for struct in symbols.structs]),
+        global_var_counts=get_counts(
+            [global_var for global_var in symbols.global_vars]
+        ),
+        struct_member_counts=get_counts(
+            list(itertools.chain(*[struct.members for struct in symbols.structs]))
+        ),
+        local_var_counts=get_counts(
+            list(
+                itertools.chain(
+                    *[function.local_vars for function in symbols.functions]
+                )
+            )
+        ),
+    )
+
+
 # Printing stuff
 
 
-def print_classifications(classifications):
+def print_classifications(classifications: Dict[Classification, List[str]]) -> None:
     for classification, names in classifications.items():
         if not names:
             continue
         print(f"{classification.name}: {', '.join(sorted(names))}\n")
 
 
-def format_totals(classifications) -> str:
-    summary = ""
-    total = 0
-    for classification, names in classifications.items():
-        summary += f"{classification.name}={len(names)}, "
-        total += len(names)
-    summary += f"total={total}"
-    return summary
-
-
-def print_classified_symbols(symbols: List[ClassifiedSymbol]):
+def print_classified_symbols(symbols: List[ClassifiedSymbol]) -> None:
     d: Dict[Classification, List[str]] = defaultdict(list)
     for symbol in symbols:
         d[symbol.classification].append(symbol.symbol_name)
     print_classifications(d)
-    print(format_totals(d))
 
 
-def print_all_symbols(symbols: AllSymbols):
+def print_all_symbols(symbols: AllSymbols) -> None:
     print("FUNCTIONS")
     print_classified_symbols([function.name for function in symbols.functions])
     print("STRUCTS")
@@ -266,6 +315,25 @@ def print_all_symbols(symbols: AllSymbols):
             )
         )
     )
+
+
+def print_statistics_and_get_score(statistics: Statistics) -> float:
+    score = 0.0
+    print("Total counts:")
+    for symbol_type, counts in (
+        ("functions", statistics.function_counts),
+        ("structs", statistics.struct_counts),
+        ("global vars", statistics.global_var_counts),
+        ("struct members", statistics.struct_member_counts),
+        ("local vars", statistics.local_var_counts),
+    ):
+        good = counts[Classification.GOOD]
+        malformed = counts[Classification.MALFORMED]
+        undocumented = counts[Classification.UNDOCUMENTED]
+        total = good + malformed + undocumented
+        print(f"{symbol_type}: {good}/{total} ({good / total * 100:.4f}%)")
+        score += 0.2 * (good / total)
+    return score
 
 
 if __name__ == "__main__":
@@ -297,7 +365,10 @@ if __name__ == "__main__":
         collect_global_vars(ast)
         Visitor().visit(ast)
 
+    statistics = build_statistics(all_symbols)
     print_all_symbols(all_symbols)
+    score = print_statistics_and_get_score(statistics)
+    print(f"final score: {score * 100:.4f}")
 
     breakpoint()
     exit(0)
