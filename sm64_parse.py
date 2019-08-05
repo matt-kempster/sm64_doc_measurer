@@ -1,13 +1,15 @@
 #!/usr/bin/env python3.7
 
 import itertools
+import pickle
 import re
+import subprocess
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
-from typing import Dict, List, NamedTuple, Set, Tuple
+from typing import Dict, List, NamedTuple, Optional, Set, Tuple
 
 from pycparser import c_ast, parse_file
 from pycparser.c_ast import FileAST, NodeVisitor
@@ -69,7 +71,7 @@ class AllSymbols:
     global_vars: Set[ClassifiedSymbol] = field(default_factory=set)
 
 
-all_symbols = AllSymbols()
+ALL_SYMBOLS = AllSymbols()
 
 
 @dataclass(frozen=True)
@@ -210,9 +212,9 @@ def classify_global_var(name: str) -> Classification:
 
 class Visitor(NodeVisitor):
     def visit_FuncDef(self, node):
-        global all_symbols
+        global ALL_SYMBOLS
         name = node.decl.name
-        all_symbols.functions.add(
+        ALL_SYMBOLS.functions.add(
             Function(
                 name=ClassifiedSymbol(name, classify_function_name(name)),
                 args=classify_all_args(node),
@@ -221,7 +223,7 @@ class Visitor(NodeVisitor):
         )
 
     def visit_Struct(self, node):
-        global all_symbols
+        global ALL_SYMBOLS
         if not node.name or re.match(r"Dummy[0-9]+$", node.name):
             # Suppress "Dummy" structs, which are used for bss reordering.
             return
@@ -229,18 +231,18 @@ class Visitor(NodeVisitor):
             name=ClassifiedSymbol(node.name, classify_struct_name(node.name)),
             members=classify_all_struct_members(node),
         )
-        all_symbols.structs.add(struct)
+        ALL_SYMBOLS.structs.add(struct)
 
 
 def collect_global_vars(ast: FileAST):
-    global all_symbols
+    global ALL_SYMBOLS
 
     for child in ast.children():
         decl = child[1]
         if isinstance(decl, c_ast.Decl) and decl.name:
             if isinstance(decl.children()[0][1], (c_ast.FuncDecl, c_ast.Struct)):
                 continue
-            all_symbols.global_vars.add(
+            ALL_SYMBOLS.global_vars.add(
                 ClassifiedSymbol(decl.name, classify_global_var(decl.name))
             )
 
@@ -336,12 +338,32 @@ def print_statistics_and_get_score(statistics: Statistics) -> float:
     return score
 
 
-if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("usage: sm64_parse PATH_TO_SM64_SOURCE_DIR")
-        exit(1)
+def get_git_rev(sm64_source: Path) -> str:
+    return (
+        subprocess.run(
+            ["/usr/bin/git", "-C", str(sm64_source), "rev-parse", "HEAD"],
+            capture_output=True,
+        )
+        .stdout.decode("utf-8")
+        .rstrip()
+    )
 
-    root = Path(sys.argv[1])
+
+def parse_cache(path: Path) -> AllSymbols:
+    with path.open(mode="rb") as open_file:
+        return pickle.load(open_file)
+
+
+def print_everything(symbols: AllSymbols) -> None:
+    statistics = build_statistics(symbols)
+    print_all_symbols(symbols)
+    score = print_statistics_and_get_score(statistics)
+    print(f"final score: {score * 100:.4f}%")
+    breakpoint()
+
+
+def collect_all_symbols(root: Path) -> AllSymbols:
+    global ALL_SYMBOLS
     include_dir = root / "include"
     build_include_dir_jp = root / "build" / "jp" / "include"
     build_include_dir_us = root / "build" / "us" / "include"
@@ -364,11 +386,27 @@ if __name__ == "__main__":
         )
         collect_global_vars(ast)
         Visitor().visit(ast)
+    return ALL_SYMBOLS
 
-    statistics = build_statistics(all_symbols)
-    print_all_symbols(all_symbols)
-    score = print_statistics_and_get_score(statistics)
-    print(f"final score: {score * 100:.4f}")
 
-    breakpoint()
+if __name__ == "__main__":
+    if len(sys.argv) < 2 or (len(sys.argv) > 3 and sys.argv[2] != "--overwrite"):
+        print("usage: sm64_parse PATH_TO_SM64_SOURCE_DIR [--overwrite]")
+        exit(1)
+
+    root = Path(sys.argv[1])
+    should_overwrite = len(sys.argv) == 3
+
+    rev = get_git_rev(root)
+    cache = Path(__file__).parent / "doc_cache"
+    cache.mkdir(exist_ok=True)
+    cache_file = cache / rev
+    if cache_file.is_file() and not should_overwrite:
+        all_symbols = parse_cache(cache_file)
+    else:
+        all_symbols = collect_all_symbols(root)
+        with cache_file.open(mode="wb") as open_file:
+            pickle.dump(all_symbols, open_file)
+
+    print_everything(all_symbols)
     exit(0)
