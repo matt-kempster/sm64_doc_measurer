@@ -1,5 +1,6 @@
 #!/usr/bin/env python3.7
 
+import argparse
 import itertools
 import pickle
 import re
@@ -338,7 +339,13 @@ def print_statistics_and_get_score(statistics: Statistics) -> float:
     return score
 
 
-def get_git_rev(sm64_source: Path) -> str:
+def get_git_rev(sm64_source: Path, commit_num: int) -> str:
+    print("...checking out master...")
+    subprocess.run(["/usr/bin/git", "-C", str(sm64_source), "checkout", "master"])
+    print(f"...checking out HEAD~{commit_num}...")
+    subprocess.run(
+        ["/usr/bin/git", "-C", str(sm64_source), "checkout", f"HEAD~{commit_num}"]
+    )
     return (
         subprocess.run(
             ["/usr/bin/git", "-C", str(sm64_source), "rev-parse", "HEAD"],
@@ -389,15 +396,8 @@ def collect_all_symbols(root: Path) -> AllSymbols:
     return ALL_SYMBOLS
 
 
-if __name__ == "__main__":
-    if len(sys.argv) < 2 or (len(sys.argv) > 3 and sys.argv[2] != "--overwrite"):
-        print("usage: sm64_parse PATH_TO_SM64_SOURCE_DIR [--overwrite]")
-        exit(1)
-
-    root = Path(sys.argv[1])
-    should_overwrite = len(sys.argv) == 3
-
-    rev = get_git_rev(root)
+def analyze_commit(commit_num: int) -> None:
+    rev = get_git_rev(root, commit_num)
     cache = Path(__file__).parent / "doc_cache"
     cache.mkdir(exist_ok=True)
     cache_file = cache / rev
@@ -409,4 +409,21 @@ if __name__ == "__main__":
             pickle.dump(all_symbols, open_file)
 
     print_everything(all_symbols)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("root", metavar="PATH_TO_SM64_SOURCE_DIR")
+    parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--commits-to-analyze", type=int, default=1)
+    args = parser.parse_args()
+
+    root = Path(args.root)
+    should_overwrite = args.overwrite
+    commits_to_analyze = args.commits_to_analyze
+
+    for commit_num in range(commits_to_analyze):
+        print(f"analyzing commit HEAD~{commit_num}...")
+        analyze_commit(commit_num)
+
     exit(0)
