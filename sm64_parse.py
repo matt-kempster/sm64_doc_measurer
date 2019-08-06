@@ -10,7 +10,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
-from typing import Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Dict, List, NamedTuple, Optional, Set, Tuple, Union
 
 from pycparser import c_ast, parse_file
 from pycparser.c_ast import FileAST, NodeVisitor
@@ -340,20 +340,23 @@ def print_statistics_and_get_score(statistics: Statistics) -> float:
 
 
 def get_git_rev(sm64_source: Path, commit_num: int) -> str:
-    print("...checking out master...")
-    subprocess.run(["/usr/bin/git", "-C", str(sm64_source), "checkout", "master"])
-    print(f"...checking out HEAD~{commit_num}...")
-    subprocess.run(
-        ["/usr/bin/git", "-C", str(sm64_source), "checkout", f"HEAD~{commit_num}"]
-    )
-    return (
+    rev = (
         subprocess.run(
-            ["/usr/bin/git", "-C", str(sm64_source), "rev-parse", "HEAD"],
+            [
+                "/usr/bin/git",
+                "-C",
+                str(sm64_source),
+                "rev-parse",
+                f"master~{commit_num}",
+            ],
             capture_output=True,
         )
         .stdout.decode("utf-8")
         .rstrip()
     )
+    print(f"...checking out master~{commit_num}...")
+    subprocess.run(["/usr/bin/git", "-C", str(sm64_source), "checkout", rev])
+    return rev
 
 
 def parse_cache(path: Path) -> AllSymbols:
@@ -361,12 +364,12 @@ def parse_cache(path: Path) -> AllSymbols:
         return pickle.load(open_file)
 
 
-def print_everything(symbols: AllSymbols) -> None:
+def print_everything(symbols: AllSymbols) -> float:
     statistics = build_statistics(symbols)
-    print_all_symbols(symbols)
+    # print_all_symbols(symbols)
     score = print_statistics_and_get_score(statistics)
     print(f"final score: {score * 100:.4f}%")
-    breakpoint()
+    return score
 
 
 def collect_all_symbols(root: Path) -> AllSymbols:
@@ -389,14 +392,14 @@ def collect_all_symbols(root: Path) -> AllSymbols:
         ast = get_ast_from_file(
             filename,
             [include_dir, src_dir, build_include_dir_jp, build_include_dir_us],
-            [force_include_sm64, force_include_ultra64],
+            [force_include_ultra64, force_include_sm64],
         )
         collect_global_vars(ast)
         Visitor().visit(ast)
     return ALL_SYMBOLS
 
 
-def analyze_commit(commit_num: int) -> None:
+def analyze_commit(root: Path, commit_num: int) -> float:
     rev = get_git_rev(root, commit_num)
     cache = Path(__file__).parent / "doc_cache"
     cache.mkdir(exist_ok=True)
@@ -408,7 +411,18 @@ def analyze_commit(commit_num: int) -> None:
         with cache_file.open(mode="wb") as open_file:
             pickle.dump(all_symbols, open_file)
 
-    print_everything(all_symbols)
+    return print_everything(all_symbols)
+
+
+def git_get_rev_count(sm64_source: Path) -> int:
+    return int(
+        subprocess.run(
+            ["/usr/bin/git", "-C", str(sm64_source), "rev-list", "--count", "master"],
+            capture_output=True,
+        )
+        .stdout.decode("utf-8")
+        .rstrip()
+    )
 
 
 if __name__ == "__main__":
@@ -421,9 +435,17 @@ if __name__ == "__main__":
     root = Path(args.root)
     should_overwrite = args.overwrite
     commits_to_analyze = args.commits_to_analyze
+    rev_count = git_get_rev_count(root)
 
+    # "results" is this stupid type to make converting to a Flot dataset
+    # as easy as possible.
+    results: List[List[Union[int, float]]] = []
     for commit_num in range(commits_to_analyze):
         print(f"analyzing commit HEAD~{commit_num}...")
-        analyze_commit(commit_num)
+        score = analyze_commit(root, commit_num)
+        results.append([rev_count - commit_num, score])
+
+    print("final results:")
+    print(results)
 
     exit(0)
