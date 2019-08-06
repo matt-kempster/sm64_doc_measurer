@@ -399,7 +399,7 @@ def collect_all_symbols(root: Path) -> AllSymbols:
     return ALL_SYMBOLS
 
 
-def analyze_commit(root: Path, commit_num: int) -> float:
+def analyze_commit(root: Path, should_overwrite: bool, commit_num: int) -> float:
     rev = get_git_rev(root, commit_num)
     cache = Path(__file__).parent / "doc_cache"
     cache.mkdir(exist_ok=True)
@@ -425,7 +425,26 @@ def git_get_rev_count(sm64_source: Path) -> int:
     )
 
 
-if __name__ == "__main__":
+def sm64_parse(
+    root: Path, should_overwrite: bool = False, commits_to_analyze: int = 1
+) -> List[List[Union[int, float]]]:
+
+    rev_count = git_get_rev_count(root)
+
+    # "results" is this stupid type to make converting to a Flot dataset
+    # as easy as possible.
+    results: List[List[Union[int, float]]] = []
+    for commit_num in range(commits_to_analyze):
+        print(f"analyzing commit HEAD~{commit_num}...")
+        score = analyze_commit(root, should_overwrite, commit_num)
+        results.append([rev_count - commit_num, score])
+
+    print("final results:")
+    print(results)
+    return results
+
+
+def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("root", metavar="PATH_TO_SM64_SOURCE_DIR")
     parser.add_argument("--overwrite", action="store_true")
@@ -435,17 +454,9 @@ if __name__ == "__main__":
     root = Path(args.root)
     should_overwrite = args.overwrite
     commits_to_analyze = args.commits_to_analyze
-    rev_count = git_get_rev_count(root)
+    sm64_parse(root, should_overwrite, commits_to_analyze)
+    return 0
 
-    # "results" is this stupid type to make converting to a Flot dataset
-    # as easy as possible.
-    results: List[List[Union[int, float]]] = []
-    for commit_num in range(commits_to_analyze):
-        print(f"analyzing commit HEAD~{commit_num}...")
-        score = analyze_commit(root, commit_num)
-        results.append([rev_count - commit_num, score])
 
-    print("final results:")
-    print(results)
-
-    exit(0)
+if __name__ == "__main__":
+    sys.exit(main())
