@@ -340,7 +340,7 @@ def print_statistics_and_get_score(statistics: Statistics) -> float:
 
 
 def get_git_rev(sm64_source: Path, commit_num: int) -> str:
-    rev = (
+    return (
         subprocess.run(
             [
                 "/usr/bin/git",
@@ -354,9 +354,11 @@ def get_git_rev(sm64_source: Path, commit_num: int) -> str:
         .stdout.decode("utf-8")
         .rstrip()
     )
+
+
+def git_checkout(sm64_source: Path, commit_num: int, rev: str) -> None:
     print(f"...checking out master~{commit_num}...")
     subprocess.run(["/usr/bin/git", "-C", str(sm64_source), "checkout", rev])
-    return rev
 
 
 def parse_cache(path: Path) -> AllSymbols:
@@ -407,6 +409,7 @@ def analyze_commit(root: Path, should_overwrite: bool, commit_num: int) -> float
     if cache_file.is_file() and not should_overwrite:
         all_symbols = parse_cache(cache_file)
     else:
+        git_checkout(root, commit_num, rev)
         all_symbols = collect_all_symbols(root)
         with cache_file.open(mode="wb") as open_file:
             pickle.dump(all_symbols, open_file)
