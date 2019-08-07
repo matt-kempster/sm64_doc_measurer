@@ -414,30 +414,39 @@ def analyze_commit(root: Path, should_overwrite: bool, commit_num: int) -> float
     return print_everything(all_symbols)
 
 
-def git_get_rev_count(sm64_source: Path) -> int:
-    return int(
-        subprocess.run(
-            ["/usr/bin/git", "-C", str(sm64_source), "rev-list", "--count", "master"],
-            capture_output=True,
+def git_get_timestamp(sm64_source: Path, commit_num: int) -> int:
+    return (
+        int(
+            subprocess.run(
+                [
+                    "/usr/bin/git",
+                    "-C",
+                    str(sm64_source),
+                    "show",
+                    "-s",
+                    "--format=%ct",
+                    f"master~{commit_num}",
+                ],
+                capture_output=True,
+            )
+            .stdout.decode("utf-8")
+            .rstrip()
         )
-        .stdout.decode("utf-8")
-        .rstrip()
+        * 1000  # Flot wants milliseconds since epoch for some reason...
     )
 
 
 def sm64_parse(
     root: Path, should_overwrite: bool = False, commits_to_analyze: int = 1
 ) -> List[List[Union[int, float]]]:
-
-    rev_count = git_get_rev_count(root)
-
     # "results" is this stupid type to make converting to a Flot dataset
     # as easy as possible.
     results: List[List[Union[int, float]]] = []
     for commit_num in range(commits_to_analyze):
-        print(f"analyzing commit HEAD~{commit_num}...")
+        print(f"analyzing commit master~{commit_num}...")
         score = analyze_commit(root, should_overwrite, commit_num)
-        results.append([rev_count - commit_num, score])
+        timestamp = git_get_timestamp(root, commit_num)
+        results.append([timestamp, score])
 
     print("final results:")
     print(results)

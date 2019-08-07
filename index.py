@@ -68,7 +68,13 @@ def render_title(data):
 
                 var total = {results};
 
-                $.plot("#placeholder", [ total ]);
+		        $.plot(
+                    "#placeholder",
+                    [total],
+                    {{
+                        xaxis: {{ mode: "time", timeBase: "milliseconds" }}
+		            }}
+                );
 
                 // Add the Flot version string to the footer
                 $("#footer").prepend("Flot " + $.plot.version + " &ndash; ");
