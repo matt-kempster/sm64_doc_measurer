@@ -5,9 +5,14 @@
 
 		        $.plot(
                     "#placeholder",
-                    [total],
+                    [
+                        {
+                            data: total,
+                            lines: { show: true, steps: true }
+                        }
+                    ],
                     {
-			            xaxis: { mode: "time", timeBase: "milliseconds" }
+                        xaxis: { mode: "time", timeBase: "milliseconds" }
 		            }
                 );
 

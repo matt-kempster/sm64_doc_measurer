@@ -70,7 +70,12 @@ def render_title(data):
 
 		        $.plot(
                     "#placeholder",
-                    [total],
+                    [
+                        {{
+                            data: total,
+                            lines: {{ show: true, steps: true }}
+                        }}
+                    ],
                     {{
                         xaxis: {{ mode: "time", timeBase: "milliseconds" }}
 		            }}
