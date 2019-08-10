@@ -401,11 +401,22 @@ def collect_all_symbols(root: Path) -> AllSymbols:
     return ALL_SYMBOLS
 
 
-def analyze_commit(root: Path, should_overwrite: bool, commit_num: int) -> float:
+@dataclass(frozen=True)
+class CommitInfo:
+    commit_hash: str
+    timestamp: int
+    author: str
+    score: float
+    num_coins: int
+
+
+def analyze_commit(root: Path, should_overwrite: bool, commit_num: int) -> CommitInfo:
+    global ALL_SYMBOLS
     rev = get_git_rev(root, commit_num)
     cache = Path(__file__).parent / "doc_cache"
     cache.mkdir(exist_ok=True)
     cache_file = cache / rev
+    ALL_SYMBOLS = AllSymbols()
     if cache_file.is_file() and not should_overwrite:
         all_symbols = parse_cache(cache_file)
     else:
@@ -414,29 +425,59 @@ def analyze_commit(root: Path, should_overwrite: bool, commit_num: int) -> float
         with cache_file.open(mode="wb") as open_file:
             pickle.dump(all_symbols, open_file)
 
-    return print_everything(all_symbols)
+    score = print_everything(all_symbols)
+    return CommitInfo(
+        commit_hash=rev,
+        timestamp=git_get_timestamp(root, commit_num),
+        author=git_get_author(root, commit_num),
+        score=score,
+        num_coins=score_to_coins(score),
+    )
+
+
+def git_format(sm64_source: Path, commit_num: int, format_str: str) -> str:
+    return (
+        subprocess.run(
+            [
+                "/usr/bin/git",
+                "-C",
+                str(sm64_source),
+                "show",
+                "-s",
+                f"--format={format_str}",
+                f"master~{commit_num}",
+            ],
+            capture_output=True,
+        )
+        .stdout.decode("utf-8")
+        .rstrip()
+    )
+
+
+def git_get_author(sm64_source: Path, commit_num: int) -> str:
+    return git_format(sm64_source, commit_num, "%an")
 
 
 def git_get_timestamp(sm64_source: Path, commit_num: int) -> int:
     return (
-        int(
-            subprocess.run(
-                [
-                    "/usr/bin/git",
-                    "-C",
-                    str(sm64_source),
-                    "show",
-                    "-s",
-                    "--format=%ct",
-                    f"master~{commit_num}",
-                ],
-                capture_output=True,
-            )
-            .stdout.decode("utf-8")
-            .rstrip()
-        )
-        * 1000  # Flot wants milliseconds since epoch for some reason...
+        int(git_format(sm64_source, commit_num, "%ct"))
+        # Flot wants milliseconds since epoch for some reason...
+        * 1000
     )
+
+
+def score_to_coins(percent: float) -> int:
+    return round(percent * 2672)
+
+
+def get_coin_leaderboard(commits: List[CommitInfo]) -> Dict[str, int]:
+    d: Dict[str, int] = defaultdict(int)
+    for i, commit in enumerate(commits):
+        try:
+            d[commit.author] += commit.num_coins - commits[i + 1].num_coins
+        except IndexError:
+            continue
+    return d
 
 
 def sm64_parse(
@@ -444,15 +485,19 @@ def sm64_parse(
 ) -> List[List[Union[int, float]]]:
     # "results" is this stupid type to make converting to a Flot dataset
     # as easy as possible.
+    commits: List[CommitInfo] = []
     results: List[List[Union[int, float]]] = []
     for commit_num in range(commits_to_analyze):
         print(f"analyzing commit master~{commit_num}...")
-        score = analyze_commit(root, should_overwrite, commit_num)
-        timestamp = git_get_timestamp(root, commit_num)
-        results.append([timestamp, score])
+        commit_info: CommitInfo = analyze_commit(root, should_overwrite, commit_num)
+        results.append([commit_info.timestamp, commit_info.num_coins])
+        commits.append(commit_info)
 
     print("final results:")
     print(results)
+
+    print("score leaderboard:")
+    print(sorted(get_coin_leaderboard(commits).items(), key=lambda item: item[1]))
     return results
 
 

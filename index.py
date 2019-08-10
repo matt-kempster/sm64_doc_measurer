@@ -31,9 +31,13 @@ def render_title(data):
         e.meta(http_equiv="Content-Type", content="text/html; charset=utf-8"),
         "{title}",
         e.link(href="graph.css", rel="stylesheet", type_="text/css"),
-        e.script(language="javascript", type_="text/javascript", src="js/jquery.min.js"),
+        e.script(
+            language="javascript", type_="text/javascript", src="js/jquery.min.js"
+        ),
         *[
-            e.script(language="javascript", type_="text/javascript", src=js_src + ".min.js")
+            e.script(
+                language="javascript", type_="text/javascript", src=js_src + ".min.js"
+            )
             for js_src in [
                 "js/jquery.canvaswrapper",
                 "js/jquery.colorhelpers",
