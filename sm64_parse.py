@@ -220,12 +220,16 @@ def classify_global_var(name: str) -> Classification:
 
 
 class Visitor(NodeVisitor):
+    def __init__(self):
+        super().__init__()
+        self.functions: Set[Function] = set()
+        self.structs: Set[Struct] = set()
+
     def visit_FuncDef(self, node):
-        global ALL_SYMBOLS
         name = node.decl.name
         if not name or should_ignore_file(node.coord.file):
             return
-        ALL_SYMBOLS.functions.add(
+        self.functions.add(
             Function(
                 name=ClassifiedSymbol(name, classify_function_name(name)),
                 filename=node.coord.file,
@@ -235,7 +239,6 @@ class Visitor(NodeVisitor):
         )
 
     def visit_Struct(self, node):
-        global ALL_SYMBOLS
         if (
             not node.name
             or should_ignore_file(node.coord.file)
@@ -250,23 +253,26 @@ class Visitor(NodeVisitor):
         )
         if not struct.members:
             return
-        ALL_SYMBOLS.structs.add(struct)
+        self.structs.add(struct)
 
 
-def collect_global_vars(ast: FileAST):
-    global ALL_SYMBOLS
-
+def collect_global_vars(ast: FileAST) -> Set[GlobalVar]:
+    global_vars: Set[GlobalVar] = set()
     for child in ast.children():
         decl = child[1]
-        if isinstance(decl, c_ast.Decl) and decl.name:
-            if isinstance(decl.children()[0][1], (c_ast.FuncDecl, c_ast.Struct)):
-                continue
-            ALL_SYMBOLS.global_vars.add(
-                GlobalVar(
-                    name=ClassifiedSymbol(decl.name, classify_global_var(decl.name)),
-                    filename=decl.coord.file,
-                )
+        if (
+            not isinstance(decl, c_ast.Decl)
+            or not decl.name
+            or isinstance(decl.children()[0][1], (c_ast.FuncDecl, c_ast.Struct))
+        ):
+            continue
+        global_vars.add(
+            GlobalVar(
+                name=ClassifiedSymbol(decl.name, classify_global_var(decl.name)),
+                filename=decl.coord.file,
             )
+        )
+    return global_vars
 
 
 # Counting stuff
@@ -396,7 +402,7 @@ def print_everything(symbols: AllSymbols) -> float:
 
 
 def collect_all_symbols(root: Path) -> AllSymbols:
-    global ALL_SYMBOLS
+    all_symbols = AllSymbols()
     include_dir = root / "include"
     build_include_dir_jp = root / "build" / "jp" / "include"
     build_include_dir_us = root / "build" / "us" / "include"
@@ -420,9 +426,12 @@ def collect_all_symbols(root: Path) -> AllSymbols:
             [include_dir, src_dir, build_include_dir_jp, build_include_dir_us],
             [force_include_ultra64, force_include_sm64],
         )
-        collect_global_vars(ast)
-        Visitor().visit(ast)
-    return ALL_SYMBOLS
+        all_symbols.global_vars |= collect_global_vars(ast)
+        visitor = Visitor()
+        visitor.visit(ast)
+        all_symbols.functions |= visitor.functions
+        all_symbols.structs |= visitor.structs
+    return all_symbols
 
 
 @dataclass(frozen=True)
@@ -435,12 +444,10 @@ class CommitInfo:
 
 
 def analyze_commit(root: Path, should_overwrite: bool, commit_num: int) -> CommitInfo:
-    global ALL_SYMBOLS
     rev = get_git_rev(root, commit_num)
     cache = Path(__file__).parent / "doc_cache"
     cache.mkdir(exist_ok=True)
     cache_file = cache / rev
-    ALL_SYMBOLS = AllSymbols()
     if cache_file.is_file() and not should_overwrite:
         all_symbols = parse_cache(cache_file)
     else:
