@@ -4,32 +4,67 @@
 !_TAG_PROGRAM_NAME	Exuberant Ctags	//
 !_TAG_PROGRAM_URL	http://ctags.sourceforge.net	/official site/
 !_TAG_PROGRAM_VERSION	5.9~svn20110310	//
-AllSymbols	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^class AllSymbols:$/;"	kind:class	line:65
-Classification	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^class Classification(Enum):$/;"	kind:class	line:39
-ClassifiedSymbol	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^class ClassifiedSymbol:$/;"	kind:class	line:46
-Function	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^class Function:$/;"	kind:class	line:52
-GOOD	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^    GOOD = auto()$/;"	kind:variable	line:42
-MALFORMED	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^    MALFORMED = auto()$/;"	kind:variable	line:41
-Struct	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^class Struct:$/;"	kind:class	line:59
-UNDOCUMENTED	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^    UNDOCUMENTED = auto()$/;"	kind:variable	line:40
-Visitor	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^class Visitor(NodeVisitor):$/;"	kind:class	line:181
-all_symbols	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^all_symbols = AllSymbols()$/;"	kind:variable	line:71
-classify_all_args	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def classify_all_args(node) -> Tuple[ClassifiedSymbol, ...]:$/;"	kind:function	line:132
-classify_all_local_vars	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def classify_all_local_vars(node) -> Tuple[ClassifiedSymbol, ...]:$/;"	kind:function	line:146
-classify_all_struct_members	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def classify_all_struct_members(node) -> Tuple[ClassifiedSymbol, ...]:$/;"	kind:function	line:155
-classify_arg	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def classify_arg(arg: str) -> Classification:$/;"	kind:function	line:107
-classify_function_name	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def classify_function_name(name: str) -> Classification:$/;"	kind:function	line:77
-classify_global_var	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def classify_global_var(name: str) -> Classification:$/;"	kind:function	line:166
-classify_local_var	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def classify_local_var(name: str) -> Classification:$/;"	kind:function	line:128
-classify_struct_member	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def classify_struct_member(name: str) -> Classification:$/;"	kind:function	line:120
-classify_struct_name	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def classify_struct_name(name: str) -> Classification:$/;"	kind:function	line:89
-collect_global_vars	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def collect_global_vars(ast: FileAST):$/;"	kind:function	line:204
-format_totals	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def format_totals(classifications) -> str:$/;"	kind:function	line:227
-get_ast_from_file	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def get_ast_from_file($/;"	kind:function	line:18
-print_all_symbols	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def print_all_symbols(symbols: AllSymbols):$/;"	kind:function	line:245
-print_classifications	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def print_classifications(classifications):$/;"	kind:function	line:220
-print_classified_symbols	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def print_classified_symbols(symbols: List[ClassifiedSymbol]):$/;"	kind:function	line:237
-should_ignore_file	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def should_ignore_file(filename: str) -> bool:$/;"	kind:function	line:103
+ALL_SYMBOLS	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^ALL_SYMBOLS = AllSymbols()$/;"	kind:variable	line:83
+AllSymbols	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^class AllSymbols:$/;"	kind:class	line:77
+Classification	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^class Classification(Enum):$/;"	kind:class	line:43
+ClassifiedSymbol	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^class ClassifiedSymbol:$/;"	kind:class	line:50
+CommitInfo	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^class CommitInfo:$/;"	kind:class	line:428
+Function	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^class Function:$/;"	kind:class	line:56
+GOOD	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^    GOOD = auto()$/;"	kind:variable	line:46
+GlobalVar	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^class GlobalVar:$/;"	kind:class	line:71
+MALFORMED	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^    MALFORMED = auto()$/;"	kind:variable	line:45
+PORT	../../../../../Matt/Documents/sm64/sm64_doc_measurer/generate_site.py	/^PORT = 8000$/;"	kind:variable	line:14
+Statistics	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^class Statistics:$/;"	kind:class	line:87
+Struct	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^class Struct:$/;"	kind:class	line:64
+UNDOCUMENTED	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^    UNDOCUMENTED = auto()$/;"	kind:variable	line:44
+Visitor	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^class Visitor(NodeVisitor):$/;"	kind:class	line:222
+analyze_commit	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def analyze_commit(root: Path, should_overwrite: bool, commit_num: int) -> CommitInfo:$/;"	kind:function	line:436
+body_renderer	../../../../../Matt/Documents/sm64/sm64_doc_measurer/index.py	/^            body_renderer=body_renderer,$/;"	kind:variable	line:133
+build_statistics	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def build_statistics(symbols: AllSymbols) -> Statistics:$/;"	kind:function	line:280
+classify_all_args	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def classify_all_args(node) -> Tuple[ClassifiedSymbol, ...]:$/;"	kind:function	line:170
+classify_all_local_vars	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def classify_all_local_vars(node) -> Tuple[ClassifiedSymbol, ...]:$/;"	kind:function	line:184
+classify_all_struct_members	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def classify_all_struct_members(node) -> Tuple[ClassifiedSymbol, ...]:$/;"	kind:function	line:193
+classify_arg	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def classify_arg(arg: str) -> Classification:$/;"	kind:function	line:130
+classify_function_name	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def classify_function_name(name: str) -> Classification:$/;"	kind:function	line:98
+classify_global_var	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def classify_global_var(name: str) -> Classification:$/;"	kind:function	line:204
+classify_local_var	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def classify_local_var(name: str) -> Classification:$/;"	kind:function	line:156
+classify_struct_member	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def classify_struct_member(name: str) -> Classification:$/;"	kind:function	line:143
+classify_struct_name	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def classify_struct_name(name: str) -> Classification:$/;"	kind:function	line:112
+collect_all_symbols	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def collect_all_symbols(root: Path) -> AllSymbols:$/;"	kind:function	line:396
+collect_global_vars	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def collect_global_vars(ast: FileAST, filename: str):$/;"	kind:function	line:254
+contents	../../../../../Matt/Documents/sm64/sm64_doc_measurer/index.py	/^contents = _render($/;"	kind:variable	line:12
+data	../../../../../Matt/Documents/sm64/sm64_doc_measurer/index.py	/^            data=data,$/;"	kind:variable	line:130
+doctype	../../../../../Matt/Documents/sm64/sm64_doc_measurer/index.py	/^doctype = _render($/;"	kind:variable	line:6
+generate_site.py	../../../../../Matt/Documents/sm64/sm64_doc_measurer/generate_site.py	1;"	kind:file	line:1
+get_ast_from_file	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def get_ast_from_file($/;"	kind:function	line:21
+get_coin_leaderboard	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def get_coin_leaderboard(commits: List[CommitInfo]) -> Dict[str, int]:$/;"	kind:function	line:496
+get_counts	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def get_counts(symbols: List[ClassifiedSymbol]) -> Dict[Classification, int]:$/;"	kind:function	line:273
+get_git_rev	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def get_git_rev(sm64_source: Path, commit_num: int) -> str:$/;"	kind:function	line:361
+git_checkout	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def git_checkout(sm64_source: Path, commit_num: int, rev: str) -> None:$/;"	kind:function	line:378
+git_format	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def git_format(sm64_source: Path, commit_num: int, format_str: str) -> str:$/;"	kind:function	line:461
+git_get_author	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def git_get_author(sm64_source: Path, commit_num: int) -> str:$/;"	kind:function	line:480
+git_get_timestamp	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def git_get_timestamp(sm64_source: Path, commit_num: int) -> int:$/;"	kind:function	line:484
+head_renderer	../../../../../Matt/Documents/sm64/sm64_doc_measurer/index.py	/^            head_renderer=head_renderer,$/;"	kind:variable	line:132
+index.py	../../../../../Matt/Documents/sm64/sm64_doc_measurer/index.py	1;"	kind:file	line:1
+main	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def main() -> int:$/;"	kind:function	line:527
+main_site	../../../../../Matt/Documents/sm64/sm64_doc_measurer/generate_site.py	/^def main_site() -> int:$/;"	kind:function	line:28
+parse_cache	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def parse_cache(path: Path) -> AllSymbols:$/;"	kind:function	line:383
+print_all_symbols	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def print_all_symbols(symbols: AllSymbols) -> None:$/;"	kind:function	line:317
+print_classifications	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def print_classifications(classifications: Dict[Classification, List[str]]) -> None:$/;"	kind:function	line:303
+print_classified_symbols	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def print_classified_symbols(symbols: List[ClassifiedSymbol]) -> None:$/;"	kind:function	line:310
+print_everything	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def print_everything(symbols: AllSymbols) -> float:$/;"	kind:function	line:388
+print_statistics_and_get_score	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def print_statistics_and_get_score(statistics: Statistics) -> float:$/;"	kind:function	line:342
+render	../../../../../Matt/Documents/sm64/sm64_doc_measurer/index.py	/^def render(data):$/;"	kind:function	line:138
+render_body	../../../../../Matt/Documents/sm64/sm64_doc_measurer/index.py	/^def render_body(data):$/;"	kind:function	line:102
+render_document	../../../../../Matt/Documents/sm64/sm64_doc_measurer/index.py	/^def render_document($/;"	kind:function	line:120
+render_head	../../../../../Matt/Documents/sm64/sm64_doc_measurer/index.py	/^def render_head(data, title_renderer=render_title):$/;"	kind:function	line:97
+render_html	../../../../../Matt/Documents/sm64/sm64_doc_measurer/index.py	/^def render_html($/;"	kind:function	line:107
+render_title	../../../../../Matt/Documents/sm64/sm64_doc_measurer/index.py	/^def render_title(data):$/;"	kind:function	line:25
+score_to_coins	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def score_to_coins(percent: float) -> int:$/;"	kind:function	line:492
+serve_site	../../../../../Matt/Documents/sm64/sm64_doc_measurer/generate_site.py	/^def serve_site(site_output: Path, port: int) -> None:$/;"	kind:function	line:19
+should_ignore_file	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def should_ignore_file(filename: str) -> bool:$/;"	kind:function	line:126
+sm64_parse	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^def sm64_parse($/;"	kind:function	line:506
 sm64_parse.py	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	1;"	kind:file	line:1
-visit_FuncDef	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^    def visit_FuncDef(self, node):$/;"	kind:member	line:182
-visit_Struct	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^    def visit_Struct(self, node):$/;"	kind:member	line:193
+title_renderer	../../../../../Matt/Documents/sm64/sm64_doc_measurer/index.py	/^            title_renderer=title_renderer,$/;"	kind:variable	line:131
+visit_FuncDef	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^    def visit_FuncDef(self, node):$/;"	kind:member	line:223
+visit_Struct	../../../../../Matt/Documents/sm64/sm64_doc_measurer/sm64_parse.py	/^    def visit_Struct(self, node):$/;"	kind:member	line:237

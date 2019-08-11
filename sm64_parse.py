@@ -55,6 +55,7 @@ class ClassifiedSymbol:
 @dataclass(frozen=True)
 class Function:
     name: ClassifiedSymbol
+    filename: str
     args: Tuple[ClassifiedSymbol, ...]
     local_vars: Tuple[ClassifiedSymbol, ...]
 
@@ -62,14 +63,21 @@ class Function:
 @dataclass(frozen=True)
 class Struct:
     name: ClassifiedSymbol
+    filename: str
     members: Tuple[ClassifiedSymbol, ...]
+
+
+@dataclass(frozen=True)
+class GlobalVar:
+    name: ClassifiedSymbol
+    filename: str
 
 
 @dataclass
 class AllSymbols:
     functions: Set[Function] = field(default_factory=set)
     structs: Set[Struct] = field(default_factory=set)
-    global_vars: Set[ClassifiedSymbol] = field(default_factory=set)
+    global_vars: Set[GlobalVar] = field(default_factory=set)
 
 
 ALL_SYMBOLS = AllSymbols()
@@ -215,9 +223,12 @@ class Visitor(NodeVisitor):
     def visit_FuncDef(self, node):
         global ALL_SYMBOLS
         name = node.decl.name
+        if not name or should_ignore_file(node.coord.file):
+            return
         ALL_SYMBOLS.functions.add(
             Function(
                 name=ClassifiedSymbol(name, classify_function_name(name)),
+                filename=node.coord.file,
                 args=classify_all_args(node),
                 local_vars=classify_all_local_vars(node),
             )
@@ -225,13 +236,20 @@ class Visitor(NodeVisitor):
 
     def visit_Struct(self, node):
         global ALL_SYMBOLS
-        if not node.name or re.match(r"Dummy[0-9]+$", node.name):
+        if (
+            not node.name
+            or should_ignore_file(node.coord.file)
             # Suppress "Dummy" structs, which are used for bss reordering.
+            or re.match(r"Dummy[0-9]+$", node.name)
+        ):
             return
         struct = Struct(
             name=ClassifiedSymbol(node.name, classify_struct_name(node.name)),
+            filename=node.coord.file,
             members=classify_all_struct_members(node),
         )
+        if not struct.members:
+            return
         ALL_SYMBOLS.structs.add(struct)
 
 
@@ -244,7 +262,10 @@ def collect_global_vars(ast: FileAST):
             if isinstance(decl.children()[0][1], (c_ast.FuncDecl, c_ast.Struct)):
                 continue
             ALL_SYMBOLS.global_vars.add(
-                ClassifiedSymbol(decl.name, classify_global_var(decl.name))
+                GlobalVar(
+                    name=ClassifiedSymbol(decl.name, classify_global_var(decl.name)),
+                    filename=decl.coord.file,
+                )
             )
 
 
@@ -263,7 +284,7 @@ def build_statistics(symbols: AllSymbols) -> Statistics:
         function_counts=get_counts([function.name for function in symbols.functions]),
         struct_counts=get_counts([struct.name for struct in symbols.structs]),
         global_var_counts=get_counts(
-            [global_var for global_var in symbols.global_vars]
+            [global_var.name for global_var in symbols.global_vars]
         ),
         struct_member_counts=get_counts(
             list(itertools.chain(*[struct.members for struct in symbols.structs]))
@@ -301,7 +322,7 @@ def print_all_symbols(symbols: AllSymbols) -> None:
     print("STRUCTS")
     print_classified_symbols([struct.name for struct in symbols.structs])
     print("GLOBAL VARS")
-    print_classified_symbols([global_var for global_var in symbols.global_vars])
+    print_classified_symbols([global_var.name for global_var in symbols.global_vars])
 
     print("STRUCT MEMBERS")
     print_classified_symbols(
@@ -390,6 +411,9 @@ def collect_all_symbols(root: Path) -> AllSymbols:
     for i, filename in enumerate(c_files):
         if (i + 1) % 100 == 0:
             print(f"Done with {i + 1}...")
+
+        if should_ignore_file(str(filename)):
+            continue
 
         ast = get_ast_from_file(
             filename,

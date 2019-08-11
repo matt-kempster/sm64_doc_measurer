@@ -4,6 +4,9 @@ doc_cache/
 # Generated static site
 _site/
 
+# VSCode
+.vscode/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
