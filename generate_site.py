@@ -1,6 +1,9 @@
+#!/usr/bin/env python3.7
+
 import argparse
 import http.server
 import os
+import shutil
 import socketserver
 from pathlib import Path
 
@@ -12,8 +15,6 @@ from index import render
 from sm64_parse import *
 
 PORT = 8000
-
-import shutil
 
 
 def serve_site(site_output: Path, port: int) -> None:

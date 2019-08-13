@@ -1,3 +1,5 @@
+#!/usr/bin/env python3.7
+
 from htmldoom import base as b
 from htmldoom import elements as e
 from htmldoom import render as _render

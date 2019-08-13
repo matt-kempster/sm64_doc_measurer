@@ -1,6 +1,7 @@
 #!/usr/bin/env python3.7
 
 import argparse
+import hashlib
 import itertools
 import pickle
 import re
@@ -74,13 +75,10 @@ class GlobalVar:
 
 
 @dataclass
-class AllSymbols:
+class SymbolCollection:
     functions: Set[Function] = field(default_factory=set)
     structs: Set[Struct] = field(default_factory=set)
     global_vars: Set[GlobalVar] = field(default_factory=set)
-
-
-ALL_SYMBOLS = AllSymbols()
 
 
 @dataclass(frozen=True)
@@ -219,15 +217,17 @@ def classify_global_var(name: str) -> Classification:
 # The visitors
 
 
-class Visitor(NodeVisitor):
-    def __init__(self):
+class FileVisitor(NodeVisitor):
+    def __init__(self, filename: str):
         super().__init__()
+        self.filename = filename
         self.functions: Set[Function] = set()
         self.structs: Set[Struct] = set()
 
     def visit_FuncDef(self, node):
         name = node.decl.name
-        if not name or should_ignore_file(node.coord.file):
+        # if not name or should_ignore_file(node.coord.file):
+        if not name or node.coord.file != self.filename:
             return
         self.functions.add(
             Function(
@@ -241,7 +241,8 @@ class Visitor(NodeVisitor):
     def visit_Struct(self, node):
         if (
             not node.name
-            or should_ignore_file(node.coord.file)
+            or node.coord.file != self.filename
+            # or should_ignore_file(node.coord.file)
             # Suppress "Dummy" structs, which are used for bss reordering.
             or re.match(r"Dummy[0-9]+$", node.name)
         ):
@@ -285,7 +286,7 @@ def get_counts(symbols: List[ClassifiedSymbol]) -> Dict[Classification, int]:
     return d
 
 
-def build_statistics(symbols: AllSymbols) -> Statistics:
+def build_statistics(symbols: SymbolCollection) -> Statistics:
     return Statistics(
         function_counts=get_counts([function.name for function in symbols.functions]),
         struct_counts=get_counts([struct.name for struct in symbols.structs]),
@@ -322,7 +323,7 @@ def print_classified_symbols(symbols: List[ClassifiedSymbol]) -> None:
     print_classifications(d)
 
 
-def print_all_symbols(symbols: AllSymbols) -> None:
+def print_all_symbols(symbols: SymbolCollection) -> None:
     print("FUNCTIONS")
     print_classified_symbols([function.name for function in symbols.functions])
     print("STRUCTS")
@@ -388,12 +389,17 @@ def git_checkout(sm64_source: Path, commit_num: int, rev: str) -> None:
     subprocess.run(["/usr/bin/git", "-C", str(sm64_source), "checkout", rev])
 
 
-def parse_cache(path: Path) -> AllSymbols:
+def parse_cache(path: Path) -> SymbolCollection:
     with path.open(mode="rb") as open_file:
         return pickle.load(open_file)
 
 
-def print_everything(symbols: AllSymbols) -> float:
+def save_to_cache(path: Path, symbols: SymbolCollection):
+    with path.open(mode="wb") as open_file:
+        pickle.dump(symbols, open_file)
+
+
+def print_everything(symbols: SymbolCollection) -> float:
     statistics = build_statistics(symbols)
     # print_all_symbols(symbols)
     score = print_statistics_and_get_score(statistics)
@@ -401,8 +407,14 @@ def print_everything(symbols: AllSymbols) -> float:
     return score
 
 
-def collect_all_symbols(root: Path) -> AllSymbols:
-    all_symbols = AllSymbols()
+def get_file_hash(path: Path):
+    hasher = hashlib.new("md5")
+    hasher.update(path.read_bytes())
+    return hasher.hexdigest()
+
+
+def collect_all_symbols(root: Path, overwrite_file_cache: bool) -> SymbolCollection:
+    all_symbols = SymbolCollection()
     include_dir = root / "include"
     build_include_dir_jp = root / "build" / "jp" / "include"
     build_include_dir_us = root / "build" / "us" / "include"
@@ -418,19 +430,27 @@ def collect_all_symbols(root: Path) -> AllSymbols:
         if (i + 1) % 100 == 0:
             print(f"Done with {i + 1}...")
 
-        if should_ignore_file(str(filename)):
-            continue
+        cache_file = Path(__file__).parent / "doc_cache" / get_file_hash(filename)
+        if cache_file.is_file() and not overwrite_file_cache:
+            file_symbols: SymbolCollection = parse_cache(cache_file)
+        else:
+            file_symbols = SymbolCollection()
+            ast = get_ast_from_file(
+                filename,
+                [include_dir, src_dir, build_include_dir_jp, build_include_dir_us],
+                [force_include_ultra64, force_include_sm64],
+            )
+            visitor = FileVisitor(str(filename))
+            visitor.visit(ast)
+            file_symbols.functions = visitor.functions
+            file_symbols.structs = visitor.structs
+            file_symbols.global_vars = collect_global_vars(ast)
+            save_to_cache(cache_file, file_symbols)
 
-        ast = get_ast_from_file(
-            filename,
-            [include_dir, src_dir, build_include_dir_jp, build_include_dir_us],
-            [force_include_ultra64, force_include_sm64],
-        )
-        all_symbols.global_vars |= collect_global_vars(ast)
-        visitor = Visitor()
-        visitor.visit(ast)
-        all_symbols.functions |= visitor.functions
-        all_symbols.structs |= visitor.structs
+        all_symbols.functions |= file_symbols.functions
+        all_symbols.structs |= file_symbols.structs
+        all_symbols.global_vars |= file_symbols.global_vars
+
     return all_symbols
 
 
@@ -443,18 +463,22 @@ class CommitInfo:
     num_coins: int
 
 
-def analyze_commit(root: Path, should_overwrite: bool, commit_num: int) -> CommitInfo:
+def analyze_commit(
+    root: Path,
+    overwrite_commit_cache: bool,
+    overwrite_file_cache: bool,
+    commit_num: int,
+) -> CommitInfo:
     rev = get_git_rev(root, commit_num)
     cache = Path(__file__).parent / "doc_cache"
     cache.mkdir(exist_ok=True)
     cache_file = cache / rev
-    if cache_file.is_file() and not should_overwrite:
+    if cache_file.is_file() and not overwrite_commit_cache:
         all_symbols = parse_cache(cache_file)
     else:
         git_checkout(root, commit_num, rev)
-        all_symbols = collect_all_symbols(root)
-        with cache_file.open(mode="wb") as open_file:
-            pickle.dump(all_symbols, open_file)
+        all_symbols = collect_all_symbols(root, overwrite_file_cache)
+        save_to_cache(cache_file, all_symbols)
 
     score = print_everything(all_symbols)
     return CommitInfo(
@@ -512,7 +536,10 @@ def get_coin_leaderboard(commits: List[CommitInfo]) -> Dict[str, int]:
 
 
 def sm64_parse(
-    root: Path, should_overwrite: bool = False, commits_to_analyze: int = 1
+    root: Path,
+    overwrite_commit_cache: bool = False,
+    overwrite_file_cache: bool = False,
+    commits_to_analyze: int = 1,
 ) -> List[List[Union[int, float]]]:
     # "results" is this stupid type to make converting to a Flot dataset
     # as easy as possible.
@@ -520,7 +547,9 @@ def sm64_parse(
     results: List[List[Union[int, float]]] = []
     for commit_num in range(commits_to_analyze):
         print(f"analyzing commit master~{commit_num}...")
-        commit_info: CommitInfo = analyze_commit(root, should_overwrite, commit_num)
+        commit_info: CommitInfo = analyze_commit(
+            root, overwrite_commit_cache, overwrite_file_cache, commit_num
+        )
         results.append([commit_info.timestamp, commit_info.num_coins])
         commits.append(commit_info)
 
@@ -535,14 +564,16 @@ def sm64_parse(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("root", metavar="PATH_TO_SM64_SOURCE_DIR")
-    parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--overwrite-commit-cache", action="store_true")
+    parser.add_argument("--overwrite-file-cache", action="store_true")
     parser.add_argument("--commits-to-analyze", type=int, default=1)
     args = parser.parse_args()
 
     root = Path(args.root)
-    should_overwrite = args.overwrite
+    overwrite_commit_cache = args.overwrite_commit_cache
+    overwrite_file_cache = args.overwrite_file_cache
     commits_to_analyze = args.commits_to_analyze
-    sm64_parse(root, should_overwrite, commits_to_analyze)
+    sm64_parse(root, overwrite_commit_cache, overwrite_file_cache, commits_to_analyze)
     return 0
 
 
