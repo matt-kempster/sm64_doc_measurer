@@ -428,6 +428,11 @@ def get_file_hash(path: Path):
     return hasher.hexdigest()
 
 
+from typing import Callable
+
+import typing
+
+
 def collect_all_symbols(
     root: Path, overwrite_file_cache: bool, should_measure_files: bool
 ) -> SymbolCollection:
@@ -475,35 +480,42 @@ def collect_all_symbols(
         all_symbols.global_vars |= file_symbols.global_vars
 
     if file_stats:
-        print("bottom 10 files:")
-        bottom_ten_items = sorted(file_stats.items(), key=lambda item: item[1][1])[:10]
-        print(
-            "\n".join(
-                [
-                    f"{filename.relative_to(root)}: {score:.4f}"
-                    for filename, (_, score) in sorted(
-                        file_stats.items(), key=lambda item: item[1][1]
-                    )
-                    if score > 0
-                ][:10]
+        sorted_files: List[Tuple[Path, float]] = [
+            (filename, score)
+            for filename, (_, score) in sorted(
+                file_stats.items(), key=lambda item: item[1][1]
             )
-        )
+        ]
 
-        print("top 10 files:")
-        top_ten_items = sorted(
-            file_stats.items(), key=lambda item: item[1][1], reverse=True
-        )[:10]
-        print(
-            "\n".join(
-                [
-                    f"{filename.relative_to(root)}: {score:.4f}"
-                    for filename, (_, score) in sorted(
-                        file_stats.items(), key=lambda item: item[1][1], reverse=True
-                    )
-                    if score < 1.0
-                ][:10]
-            )
-        )
+        def format_stats(filename: Path, score: float) -> str:
+            return f"{filename.relative_to(root)}: {score:.4f}"
+
+        def filter_stats(
+            func: Callable[[Tuple[Path, float]], bool],
+            sorted_files: List[Tuple[Path, float]],
+            max_len: Optional[int] = None,
+            reverse: bool = False,
+        ) -> str:
+            stat_list = [
+                format_stats(filename, score)
+                for filename, score in filter(func, sorted_files)
+            ]
+            if reverse:
+                stat_list = stat_list[::-1]
+            if max_len is not None:
+                return "\n".join(stat_list[:max_len])
+            else:
+                return "\n".join(stat_list)
+
+        for name, _func, max_len, reverse in [
+            ("undocumented", lambda tup: tup[1] == 0.0, None, False),
+            ("completed", lambda tup: tup[1] == 1.0, None, False),
+            ("bottom 10", lambda tup: tup[1] > 0.0, 10, False),
+            ("top 10", lambda tup: tup[1] < 1.0, 10, True),
+        ]:
+            func = typing.cast(Callable[[Tuple[Path, float]], bool], _func)
+            print(f"\n{name}: ")
+            print(filter_stats(func, sorted_files, max_len=max_len, reverse=reverse))
 
     return all_symbols
 
