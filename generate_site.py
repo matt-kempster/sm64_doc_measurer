@@ -32,7 +32,7 @@ def main_site() -> int:
     args = parser.parse_args()
 
     root = Path(args.root)
-    results = sm64_parse(root, commits_to_analyze=50)
+    results = sm64_parse(root, commits_to_analyze=300)
 
     parent = Path(__file__).parent
     site_output = parent / "_site"

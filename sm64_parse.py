@@ -257,7 +257,7 @@ class FileVisitor(NodeVisitor):
         self.structs.add(struct)
 
 
-def collect_global_vars(ast: FileAST) -> Set[GlobalVar]:
+def collect_global_vars(ast: FileAST, filename: str) -> Set[GlobalVar]:
     global_vars: Set[GlobalVar] = set()
     for child in ast.children():
         decl = child[1]
@@ -265,6 +265,7 @@ def collect_global_vars(ast: FileAST) -> Set[GlobalVar]:
             not isinstance(decl, c_ast.Decl)
             or not decl.name
             or isinstance(decl.children()[0][1], (c_ast.FuncDecl, c_ast.Struct))
+            or decl.coord.file != filename
         ):
             continue
         global_vars.add(
@@ -444,7 +445,7 @@ def collect_all_symbols(root: Path, overwrite_file_cache: bool) -> SymbolCollect
             visitor.visit(ast)
             file_symbols.functions = visitor.functions
             file_symbols.structs = visitor.structs
-            file_symbols.global_vars = collect_global_vars(ast)
+            file_symbols.global_vars = collect_global_vars(ast, str(filename))
             save_to_cache(cache_file, file_symbols)
 
         all_symbols.functions |= file_symbols.functions
@@ -529,7 +530,8 @@ def get_coin_leaderboard(commits: List[CommitInfo]) -> Dict[str, int]:
     d: Dict[str, int] = defaultdict(int)
     for i, commit in enumerate(commits):
         try:
-            d[commit.author] += commit.num_coins - commits[i + 1].num_coins
+            coin_diff = commit.num_coins - commits[i + 1].num_coins
+            d[commit.author] += max(coin_diff, 0)
         except IndexError:
             continue
     return d
