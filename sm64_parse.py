@@ -349,9 +349,13 @@ def print_all_symbols(symbols: SymbolCollection) -> None:
     )
 
 
-def print_statistics_and_get_score(statistics: Statistics) -> float:
+def print_statistics_and_get_score(
+    statistics: Statistics, quiet: bool = False
+) -> float:
     score = 0.0
-    print("Total counts:")
+    unseen_types = 0
+    if not quiet:
+        print("Total counts:")
     for symbol_type, counts in (
         ("functions", statistics.function_counts),
         ("structs", statistics.struct_counts),
@@ -363,8 +367,18 @@ def print_statistics_and_get_score(statistics: Statistics) -> float:
         malformed = counts[Classification.MALFORMED]
         undocumented = counts[Classification.UNDOCUMENTED]
         total = good + malformed + undocumented
-        print(f"{symbol_type}: {good}/{total} ({good / total * 100:.4f}%)")
-        score += 0.2 * (good / total)
+        if total == 0:
+            if not quiet:
+                print(f"{symbol_type}: (none)")
+            unseen_types += 1
+            continue
+        if not quiet:
+            print(f"{symbol_type}: {good}/{total} ({good / total * 100:.4f}%)")
+        score += good / total
+    if unseen_types != 5:
+        score *= 1 / (5 - unseen_types)
+    else:
+        score = 1.0
     return score
 
 
@@ -414,7 +428,9 @@ def get_file_hash(path: Path):
     return hasher.hexdigest()
 
 
-def collect_all_symbols(root: Path, overwrite_file_cache: bool) -> SymbolCollection:
+def collect_all_symbols(
+    root: Path, overwrite_file_cache: bool, should_measure_files: bool
+) -> SymbolCollection:
     all_symbols = SymbolCollection()
     include_dir = root / "include"
     build_include_dir_jp = root / "build" / "jp" / "include"
@@ -427,6 +443,7 @@ def collect_all_symbols(root: Path, overwrite_file_cache: bool) -> SymbolCollect
         *((root / "src").glob("**/*.h")),
         *((root / "src").glob("**/*.c")),
     ]
+    file_stats: Dict[Path, Tuple[Statistics, float]] = {}
     for i, filename in enumerate(c_files):
         if (i + 1) % 100 == 0:
             print(f"Done with {i + 1}...")
@@ -448,9 +465,45 @@ def collect_all_symbols(root: Path, overwrite_file_cache: bool) -> SymbolCollect
             file_symbols.global_vars = collect_global_vars(ast, str(filename))
             save_to_cache(cache_file, file_symbols)
 
+        if should_measure_files:
+            statistics = build_statistics(file_symbols)
+            score = print_statistics_and_get_score(statistics, quiet=True)
+            file_stats[filename] = (statistics, score)
+
         all_symbols.functions |= file_symbols.functions
         all_symbols.structs |= file_symbols.structs
         all_symbols.global_vars |= file_symbols.global_vars
+
+    if file_stats:
+        print("bottom 10 files:")
+        bottom_ten_items = sorted(file_stats.items(), key=lambda item: item[1][1])[:10]
+        print(
+            "\n".join(
+                [
+                    f"{filename.relative_to(root)}: {score:.4f}"
+                    for filename, (_, score) in sorted(
+                        file_stats.items(), key=lambda item: item[1][1]
+                    )
+                    if score > 0
+                ][:10]
+            )
+        )
+
+        print("top 10 files:")
+        top_ten_items = sorted(
+            file_stats.items(), key=lambda item: item[1][1], reverse=True
+        )[:10]
+        print(
+            "\n".join(
+                [
+                    f"{filename.relative_to(root)}: {score:.4f}"
+                    for filename, (_, score) in sorted(
+                        file_stats.items(), key=lambda item: item[1][1], reverse=True
+                    )
+                    if score < 1.0
+                ][:10]
+            )
+        )
 
     return all_symbols
 
@@ -468,6 +521,7 @@ def analyze_commit(
     root: Path,
     overwrite_commit_cache: bool,
     overwrite_file_cache: bool,
+    should_measure_files: bool,
     commit_num: int,
 ) -> CommitInfo:
     rev = get_git_rev(root, commit_num)
@@ -478,7 +532,9 @@ def analyze_commit(
         all_symbols = parse_cache(cache_file)
     else:
         git_checkout(root, commit_num, rev)
-        all_symbols = collect_all_symbols(root, overwrite_file_cache)
+        all_symbols = collect_all_symbols(
+            root, overwrite_file_cache, should_measure_files
+        )
         save_to_cache(cache_file, all_symbols)
 
     score = print_everything(all_symbols)
@@ -541,6 +597,7 @@ def sm64_parse(
     root: Path,
     overwrite_commit_cache: bool = False,
     overwrite_file_cache: bool = False,
+    should_measure_files: bool = False,
     commits_to_analyze: int = 1,
 ) -> List[List[Union[int, float]]]:
     # "results" is this stupid type to make converting to a Flot dataset
@@ -550,7 +607,11 @@ def sm64_parse(
     for commit_num in range(commits_to_analyze):
         print(f"analyzing commit master~{commit_num}...")
         commit_info: CommitInfo = analyze_commit(
-            root, overwrite_commit_cache, overwrite_file_cache, commit_num
+            root,
+            overwrite_commit_cache,
+            overwrite_file_cache,
+            should_measure_files,
+            commit_num,
         )
         results.append([commit_info.timestamp, commit_info.num_coins])
         commits.append(commit_info)
@@ -568,14 +629,22 @@ def main() -> int:
     parser.add_argument("root", metavar="PATH_TO_SM64_SOURCE_DIR")
     parser.add_argument("--overwrite-commit-cache", action="store_true")
     parser.add_argument("--overwrite-file-cache", action="store_true")
+    parser.add_argument("--measure-files-too", action="store_true")
     parser.add_argument("--commits-to-analyze", type=int, default=1)
     args = parser.parse_args()
 
     root = Path(args.root)
     overwrite_commit_cache = args.overwrite_commit_cache
     overwrite_file_cache = args.overwrite_file_cache
+    should_measure_files = args.measure_files_too
     commits_to_analyze = args.commits_to_analyze
-    sm64_parse(root, overwrite_commit_cache, overwrite_file_cache, commits_to_analyze)
+    sm64_parse(
+        root,
+        overwrite_commit_cache,
+        overwrite_file_cache,
+        should_measure_files,
+        commits_to_analyze,
+    )
     return 0
 
 
