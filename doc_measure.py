@@ -24,7 +24,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import tree_sitter_c
 from tree_sitter import Language, Parser
@@ -246,10 +246,55 @@ class Symbol:
     classification: Classification
     file: str  # repo-relative
     line: int  # 1-based
+    type_name: Optional[str] = None  # declared C type (globals), for role-aware rules
 
 
 def _classify(name: str, kind: str) -> Classification:
     return CLASSIFIERS[kind](name)
+
+
+# --------------------------------------------------------------------------- #
+# Convention / uniformity layer (layer 2)
+# --------------------------------------------------------------------------- #
+#
+# Layer 1 (the classifiers above) answers "is this a real, non-placeholder
+# name?". Layer 2 asks a *role-aware* question of the names that pass: "does it
+# follow the project's conventions?" It is scored on its own axis, over only the
+# layer-1 GOOD names, so the two goals -- completeness and uniformity -- stay
+# legible separately.
+
+# Kinds that carry a convention rule (args/locals have no settled casing rule).
+CONVENTION_KINDS = ("function", "struct", "member", "global")
+
+_SNAKE = re.compile(r"[a-z][a-z0-9_]*$")  # set_mario_action, dialog_table_eu_en
+_PASCAL = re.compile(r"[A-Z][A-Za-z0-9]*$")  # MarioState
+_CAMEL = re.compile(r"[a-z][A-Za-z0-9]*$")  # rawStickX
+_BHV = re.compile(r"bhv[A-Z]")  # bhvStarDoor
+_GLOBAL_PREFIX = re.compile(r"(?:[gs]|gd|bhv)[A-Z]")  # gMarioState, sCount, gdFoo
+
+
+def convention_violation(sym: Symbol) -> Optional[str]:
+    """Return why a (layer-1 GOOD) symbol breaks convention, or None if it conforms."""
+    name = sym.name
+    if sym.kind == "function":
+        if not _SNAKE.match(name):
+            return "function should be snake_case"
+    elif sym.kind == "struct":
+        if not _PASCAL.match(name):
+            return "type should be PascalCase"
+    elif sym.kind == "member":
+        if not _CAMEL.match(name):
+            return "member should be camelCase"
+    elif sym.kind == "global":
+        # Type-aware family rule: a BehaviorScript must be bhv + PascalCase.
+        if sym.type_name and "BehaviorScript" in sym.type_name:
+            return None if _BHV.match(name) else "behavior should be bhv + PascalCase"
+        # General globals: a g/s (extern/static) prefix is the convention.
+        # snake_case data tables and _linker symbols are accepted alternatives.
+        if _GLOBAL_PREFIX.match(name) or _SNAKE.match(name) or name.startswith("_"):
+            return None
+        return "global should have a g/s prefix"
+    return None
 
 
 def extract_file(path: Path, rel: str) -> List[Symbol]:
@@ -263,11 +308,18 @@ def extract_source(src: bytes, rel: str) -> List[Symbol]:
     root = tree.root_node
     symbols: List[Symbol] = []
 
-    def add(name: Optional[str], kind: str, node) -> None:
+    def add(name: Optional[str], kind: str, node, type_name: Optional[str] = None):
         if not name:
             return
         symbols.append(
-            Symbol(name, kind, _classify(name, kind), rel, node.start_point[0] + 1)
+            Symbol(
+                name,
+                kind,
+                _classify(name, kind),
+                rel,
+                node.start_point[0] + 1,
+                type_name,
+            )
         )
 
     # Functions, their args, and their locals.
@@ -311,12 +363,15 @@ def extract_source(src: bytes, rel: str) -> List[Symbol]:
             for mname in _declaration_names(fd):
                 add(mname, "member", fd)
 
-    # Global variables: top-level declarations that aren't prototypes.
+    # Global variables: top-level declarations that aren't prototypes. Capture
+    # the declared type so role-aware rules can fire (e.g. BehaviorScript).
     for decl in root.named_children:
         if decl.type != "declaration" or _is_prototype(decl):
             continue
+        type_node = decl.child_by_field_name("type")
+        type_name = type_node.text.decode() if type_node is not None else None
         for name in _declaration_names(decl):
-            add(name, "global", decl)
+            add(name, "global", decl, type_name)
 
     return symbols
 
@@ -367,12 +422,33 @@ def overall_score(counts: Dict[str, Dict[Classification, int]]) -> float:
     return sum(ratios) / len(ratios) if ratios else 1.0
 
 
+def uniformity_counts(symbols: List[Symbol]) -> Dict[str, Dict[str, int]]:
+    """Per-kind conforming/violation tallies over layer-1 GOOD names only."""
+    counts: Dict[str, Dict[str, int]] = {
+        kind: {"CONFORMING": 0, "VIOLATION": 0} for kind in CONVENTION_KINDS
+    }
+    for s in symbols:
+        if s.classification != Classification.GOOD or s.kind not in counts:
+            continue
+        key = "VIOLATION" if convention_violation(s) else "CONFORMING"
+        counts[s.kind][key] += 1
+    return counts
+
+
+def uniformity_score(counts: Dict[str, Dict[str, int]]) -> float:
+    conforming = sum(c["CONFORMING"] for c in counts.values())
+    total = conforming + sum(c["VIOLATION"] for c in counts.values())
+    return conforming / total if total else 1.0
+
+
 def _bar(ratio: float, width: int = 24) -> str:
     filled = round(ratio * width)
     return "█" * filled + "░" * (width - filled)
 
 
-def print_report(symbols: List[Symbol], top_files: int, samples: int) -> float:
+def print_report(
+    symbols: List[Symbol], top_files: int, samples: int
+) -> Tuple[float, float]:
     counts = category_counts(symbols)
     score = overall_score(counts)
 
@@ -391,10 +467,27 @@ def print_report(symbols: List[Symbol], top_files: int, samples: int) -> float:
     print("-" * 54)
     print(f"{'OVERALL':<10} {'':>12} {_bar(score)} {score * 100:5.1f}%\n")
 
+    # Uniformity axis: of the names that pass completeness, which break convention?
+    ucounts = uniformity_counts(symbols)
+    uscore = uniformity_score(ucounts)
+    print(f"{'convention':<10} {'conforming':>12}   uniformity")
+    print("-" * 54)
+    for kind in CONVENTION_KINDS:
+        c = ucounts[kind]
+        total = c["CONFORMING"] + c["VIOLATION"]
+        if not total:
+            print(f"{kind:<10} {'(none)':>12}")
+            continue
+        ratio = c["CONFORMING"] / total
+        good = c["CONFORMING"]
+        print(f"{kind:<10} {good:>6}/{total:<5} {_bar(ratio)} {ratio * 100:5.1f}%")
+    print("-" * 54)
+    print(f"{'OVERALL':<10} {'':>12} {_bar(uscore)} {uscore * 100:5.1f}%\n")
+
     problems = [s for s in symbols if s.classification != Classification.GOOD]
     if not problems:
         print("Nothing needs attention — fully documented. 🎉")
-        return score
+        return score, uscore
 
     # Files needing the most attention.
     by_file: Dict[str, int] = defaultdict(int)
@@ -420,11 +513,27 @@ def print_report(symbols: List[Symbol], top_files: int, samples: int) -> float:
             print(f"    [{tag}] {s.name}  @ {s.file}:{s.line}")
         if len(offenders) > samples:
             print(f"    … and {len(offenders) - samples} more")
-    return score
+
+    # A sample of convention (uniformity) violations.
+    violations = [
+        (s, convention_violation(s))
+        for s in symbols
+        if s.classification == Classification.GOOD
+        and s.kind in CONVENTION_KINDS
+        and convention_violation(s)
+    ]
+    if violations:
+        print(f"\nConvention violations ({len(violations)} total):")
+        for s, reason in violations[:samples]:
+            print(f"    [C] {s.name}  @ {s.file}:{s.line} — {reason}")
+        if len(violations) > samples:
+            print(f"    … and {len(violations) - samples} more")
+    return score, uscore
 
 
 def to_json(symbols: List[Symbol]) -> dict:
     counts = category_counts(symbols)
+    ucounts = uniformity_counts(symbols)
     return {
         "score": overall_score(counts),
         "categories": {
@@ -441,6 +550,21 @@ def to_json(symbols: List[Symbol]) -> dict:
             }
             for s in symbols
             if s.classification != Classification.GOOD
+        ],
+        "uniformity_score": uniformity_score(ucounts),
+        "conventions": ucounts,
+        "violations": [
+            {
+                "name": s.name,
+                "kind": s.kind,
+                "reason": convention_violation(s),
+                "file": s.file,
+                "line": s.line,
+            }
+            for s in symbols
+            if s.classification == Classification.GOOD
+            and s.kind in CONVENTION_KINDS
+            and convention_violation(s)
         ],
     }
 
@@ -465,7 +589,7 @@ def main() -> int:
         return 2
 
     symbols = collect_symbols(args.root)
-    score = print_report(symbols, args.top_files, args.samples)
+    score, uscore = print_report(symbols, args.top_files, args.samples)
     data = to_json(symbols)
     if args.json:
         args.json.parent.mkdir(parents=True, exist_ok=True)
@@ -477,7 +601,7 @@ def main() -> int:
         args.html.parent.mkdir(parents=True, exist_ok=True)
         args.html.write_text(report_html.render(data, args.label))
         print(f"Wrote {args.html}")
-    print(f"\nfinal score: {score * 100:.4f}%")
+    print(f"\ncompleteness: {score * 100:.4f}%   uniformity: {uscore * 100:.4f}%")
     return 0
 
 

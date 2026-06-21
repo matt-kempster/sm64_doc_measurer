@@ -41,8 +41,34 @@ OVERALL                 ██████████████████�
 
 `--json` writes the full result, including every symbol needing attention, for
 feeding a dashboard or a "good first issue" list. `--html` writes a
-self-contained report page (data embedded, no external assets) with the
-completeness bars and a sortable/filterable worklist.
+self-contained report page (data embedded, no external assets) with both axes'
+bars and a sortable/filterable worklist.
+
+### Two axes: completeness and uniformity
+
+Documentation has two goals, scored separately:
+
+- **Completeness** (above) — does a symbol have a real, non-placeholder name?
+- **Uniformity** — of the names that *are* real, do they follow the project's
+  conventions? This is a second, *role-aware* layer over the layer-1 GOOD names:
+  functions should be `snake_case`, types `PascalCase`, struct members
+  `camelCase`, globals carry a `g`/`s` prefix, and a `BehaviorScript` global must
+  be `bhv…` (a type-aware family rule). Snake_case data tables and `_`-prefixed
+  linker symbols are accepted alternatives, not flagged.
+
+```
+convention   conforming   uniformity
+------------------------------------------------------
+function     4332/4333  ████████████████████████ 100.0%
+struct        236/238   ████████████████████████  99.2%
+member       1686/1688  ████████████████████████  99.9%
+global       2799/3152  █████████████████████░░░  88.8%
+------------------------------------------------------
+OVERALL                 ███████████████████████░  96.2%
+```
+
+Convention violations appear in the same worklist (tagged `C`, with the reason),
+and in the JSON under `violations` / `conventions` / `uniformity_score`.
 
 ### Hosted report (GitHub Pages)
 
@@ -53,11 +79,8 @@ Source: GitHub Actions**.
 
 ### Notes / caveats
 
-- The classifiers are name heuristics ported verbatim from the original engine.
-  They're tuned to SM64 conventions and aren't perfect — e.g. an argument named
-  `speed` is flagged because the `sp`-prefix rule (stack pointers) doesn't carry
-  the `space`/`speed` exception the local-variable rule has. Treat the worklist
-  as a strong signal, not gospel.
+- The classifiers are name heuristics tuned to SM64 conventions; they aren't
+  perfect, so treat the worklist as a strong signal, not gospel.
 - tree-sitter parses C, not the preprocessor: `#if VERSION_JP` / `#endif` lines
   are blanked (their guarded code is kept), so both version branches' symbols are
   counted. This slightly over-counts version-specific symbols — fine for a doc

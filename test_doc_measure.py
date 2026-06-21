@@ -139,6 +139,54 @@ def test_html_report_escapes_script_close():
     assert html.count("</script>") == 1
 
 
+def mksym(name, kind, type_name=None):
+    return m.Symbol(name, kind, C.GOOD, "x.c", 1, type_name)
+
+
+def test_convention_casing_rules():
+    assert m.convention_violation(mksym("set_mario_action", "function")) is None
+    assert m.convention_violation(mksym("setMarioAction", "function"))
+    assert m.convention_violation(mksym("MarioState", "struct")) is None
+    assert m.convention_violation(mksym("mario_state", "struct"))
+    assert m.convention_violation(mksym("rawStickX", "member")) is None
+    assert m.convention_violation(mksym("raw_stick_x", "member"))
+
+
+def test_convention_global_prefix_rules():
+    assert m.convention_violation(mksym("gMarioStates", "global")) is None
+    assert m.convention_violation(mksym("sIntangibleTimer", "global")) is None
+    # snake_case data tables and _linker symbols are accepted alternatives.
+    assert m.convention_violation(mksym("dialog_table_eu_en", "global")) is None
+    assert m.convention_violation(mksym("_engineSegmentStart", "global")) is None
+    # camelCase global with no g/s prefix is a genuine inconsistency.
+    assert m.convention_violation(mksym("audioString34", "global"))
+
+
+def test_convention_behavior_type_rule():
+    src = (
+        b"const BehaviorScript bhvGoomba[] = {};\nconst BehaviorScript behBad[] = {};\n"
+    )
+    g = {s.name: s for s in m.extract_source(src, "b.c") if s.kind == "global"}
+    assert "BehaviorScript" in (g["bhvGoomba"].type_name or "")
+    assert m.convention_violation(g["bhvGoomba"]) is None
+    assert m.convention_violation(g["behBad"]) == "behavior should be bhv + PascalCase"
+
+
+def test_uniformity_axis_excludes_args_and_locals():
+    counts = m.uniformity_counts(syms())
+    assert set(counts) == set(m.CONVENTION_KINDS)
+    assert "arg" not in counts and "local" not in counts
+    # Only layer-1 GOOD names are scored; undocumented placeholders excluded.
+    assert m.uniformity_score(counts) == 1.0  # snippet's good names all conform
+
+
+def test_to_json_has_uniformity_block():
+    d = m.to_json(syms())
+    assert "uniformity_score" in d
+    assert set(d["conventions"]) == set(m.CONVENTION_KINDS)
+    assert isinstance(d["violations"], list)
+
+
 def test_preproc_blanking_keeps_guarded_code():
     src = b"""
 #ifdef VERSION_JP
