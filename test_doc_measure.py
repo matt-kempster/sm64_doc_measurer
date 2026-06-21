@@ -581,6 +581,12 @@ def test_html_has_sidebar_and_asset_section():
     assert "asset data named" in html
 
 
+def test_html_worklist_has_group_by_file():
+    html = report_html.render(m.to_json(syms()))
+    assert 'id="groupfile"' in html and 'id="collapseall"' in html
+    assert "tr.group" in html  # grouped-row styling + JS path are present
+
+
 def test_html_has_theme_toggle_and_reason(tmp_path):
     data = m.to_json(syms())
     html = report_html.render(data, label="x")

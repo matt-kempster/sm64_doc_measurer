@@ -184,6 +184,11 @@ table collapses by default and hides fully-complete families, and **every metric
 is clickable** — a scorecard, a bar, a family, an entity, or an asset type — to
 filter the worklist to it and jump straight there.
 
+The worklist also has a **group-by-file** toggle: it buckets the rows under
+collapsible file headers (the files with the most to fix first, with a per-file
+count), plus a collapse-all / expand-all button — so you can work through the
+decomp one file at a time instead of scanning a flat list.
+
 ### Documentation comments
 
 Beyond names, there's *prose*: the decomp's house style is a `/** … */` block

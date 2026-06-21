@@ -141,6 +141,12 @@ _TEMPLATE = """<!doctype html>
   th:hover { color: var(--fg); }
   tbody tr:hover { background: var(--panel2); }
   tr.clickable { cursor: pointer; }
+  tr.group { cursor: pointer; }
+  tr.group td { background: var(--panel2); font-family: ui-monospace, monospace;
+    font-size: 12.5px; font-weight: 600; color: var(--fg); }
+  tr.group:hover td { color: var(--accent); }
+  tr.group .gtog { color: var(--muted); display: inline-block; width: 1.1em; }
+  tr.group .gc { color: var(--muted); font-weight: 600; margin-left: 6px; }
   td.name, td.fam { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   td.file { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; }
   td.reason { color: var(--fg); font-size: 12.5px; }
@@ -303,6 +309,8 @@ _TEMPLATE = """<!doctype html>
       </select>
       <select id="kind"></select>
       <select id="famsel"></select>
+      <label class="chk"><input type="checkbox" id="groupfile"> group by file</label>
+      <button class="theme-btn" id="collapseall" style="display:none">collapse all</button>
       <button class="theme-btn" id="clear">clear</button>
       <span class="count" id="count"></span>
     </div>
@@ -516,29 +524,70 @@ const groupOpts = [...new Set(rows.map(r => r.family).filter(Boolean))].sort();
 famSel.innerHTML = '<option value="">all groups</option>'
   + groupOpts.map(f => `<option value="${esc(f)}">${esc(f)}</option>`).join('');
 
-function render() {
-  const term = q.value.toLowerCase(), fk = kindSel.value, fa = axisSel.value, ff = famSel.value;
-  let view = rows.filter(r =>
-    (!fk || r.kind === fk) && (!fa || r.axis === fa) && (!ff || r.family === ff) &&
-    (!term || r.name.toLowerCase().includes(term) || r.file.toLowerCase().includes(term)));
-  view.sort((a, b) => {
-    let x = a[sortKey], y = b[sortKey];
-    return (x < y ? -1 : x > y ? 1 : 0) * sortDir;
-  });
-  countEl.textContent = view.length.toLocaleString() + ' of '
-    + rows.length.toLocaleString() + ' items';
-  document.getElementById('worklist-stat').textContent = rows.length.toLocaleString() + ' items';
-  const MAX = 2000;
-  tbody.innerHTML = view.slice(0, MAX).map(r =>
-    `<tr><td><span class="tag ${r.tag}">${r.tag}</span></td>`
+const groupChk = document.getElementById('groupfile');
+const collapseBtn = document.getElementById('collapseall');
+const collapsed = new Set();   // files collapsed in group-by-file mode
+let groupedFiles = [];         // files in the current grouped view (for collapse-all)
+
+function rowHtml(r) {
+  return `<tr><td><span class="tag ${r.tag}">${r.tag}</span></td>`
     + `<td class="kind">${r.kind}</td>`
     + `<td class="fam">${esc(r.family)}</td>`
     + `<td class="name">${esc(r.name)}</td>`
     + `<td class="file">${esc(r.file)}</td>`
     + `<td>${r.line}</td>`
-    + `<td class="reason">${esc(r.reason)}</td></tr>`
-  ).join('') + (view.length > MAX
-    ? `<tr><td colspan="7" class="count">… ${view.length - MAX} more (narrow the filter)</td></tr>` : '');
+    + `<td class="reason">${esc(r.reason)}</td></tr>`;
+}
+
+function render() {
+  const term = q.value.toLowerCase(), fk = kindSel.value, fa = axisSel.value, ff = famSel.value;
+  let view = rows.filter(r =>
+    (!fk || r.kind === fk) && (!fa || r.axis === fa) && (!ff || r.family === ff) &&
+    (!term || r.name.toLowerCase().includes(term) || r.file.toLowerCase().includes(term)));
+  document.getElementById('worklist-stat').textContent = rows.length.toLocaleString() + ' items';
+  const MAX = 2000;
+
+  if (groupChk.checked) {
+    // group rows under collapsible file headers, files with the most to fix first
+    const groups = new Map();
+    for (const r of view) {
+      if (!groups.has(r.file)) groups.set(r.file, []);
+      groups.get(r.file).push(r);
+    }
+    const files = [...groups.entries()].sort((a, b) =>
+      b[1].length - a[1].length || (a[0] < b[0] ? -1 : 1));
+    groupedFiles = files.map(f => f[0]);
+    countEl.textContent = files.length.toLocaleString() + ' files · '
+      + view.length.toLocaleString() + ' of ' + rows.length.toLocaleString() + ' items';
+    collapseBtn.textContent = collapsed.size ? 'expand all' : 'collapse all';
+    let out = '', shown = 0, capped = false;
+    for (const [file, frows] of files) {
+      const open = !collapsed.has(file);
+      out += `<tr class="group" data-file="${esc(file)}"><td colspan="7">`
+        + `<span class="gtog">${open ? '▾' : '▸'}</span>${esc(file)}`
+        + `<span class="gc">${frows.length}</span></td></tr>`;
+      if (open) {
+        frows.sort((a, b) => a.line - b.line);
+        for (const r of frows) {
+          if (shown >= MAX) { capped = true; break; }
+          out += rowHtml(r); shown++;
+        }
+      }
+      if (capped) break;
+    }
+    tbody.innerHTML = (out + (capped
+      ? `<tr><td colspan="7" class="count">… more rows hidden (collapse files or narrow the filter)</td></tr>`
+      : '')) || '<tr><td colspan="7" class="count">nothing matches</td></tr>';
+  } else {
+    view.sort((a, b) => {
+      let x = a[sortKey], y = b[sortKey];
+      return (x < y ? -1 : x > y ? 1 : 0) * sortDir;
+    });
+    countEl.textContent = view.length.toLocaleString() + ' of '
+      + rows.length.toLocaleString() + ' items';
+    tbody.innerHTML = view.slice(0, MAX).map(rowHtml).join('') + (view.length > MAX
+      ? `<tr><td colspan="7" class="count">… ${view.length - MAX} more (narrow the filter)</td></tr>` : '');
+  }
 }
 
 document.querySelectorAll('th[data-k]').forEach(th => th.addEventListener('click', () => {
@@ -547,8 +596,26 @@ document.querySelectorAll('th[data-k]').forEach(th => th.addEventListener('click
   render();
 }));
 [q, kindSel, axisSel, famSel].forEach(el => el.addEventListener('input', render));
+groupChk.addEventListener('change', () => {
+  collapseBtn.style.display = groupChk.checked ? '' : 'none';
+  render();
+});
+collapseBtn.addEventListener('click', () => {
+  if (collapsed.size) collapsed.clear();              // some collapsed -> expand all
+  else groupedFiles.forEach(f => collapsed.add(f));   // all open -> collapse all
+  render();
+});
+tbody.addEventListener('click', ev => {
+  const g = ev.target.closest('tr.group');
+  if (!g) return;
+  const f = g.dataset.file;
+  if (collapsed.has(f)) collapsed.delete(f); else collapsed.add(f);
+  render();
+});
 document.getElementById('clear').addEventListener('click', () => {
-  q.value = ''; axisSel.value = ''; kindSel.value = ''; famSel.value = ''; render();
+  q.value = ''; axisSel.value = ''; kindSel.value = ''; famSel.value = '';
+  groupChk.checked = false; collapseBtn.style.display = 'none'; collapsed.clear();
+  render();
 });
 render();
 
