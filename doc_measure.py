@@ -878,6 +878,118 @@ def collect_symbols(root: Path) -> List[Symbol]:
     return symbols
 
 
+# --------------------------------------------------------------------------- #
+# Asset data (the segment data the code symbols ignore)
+# --------------------------------------------------------------------------- #
+#
+# The bulk of the decomp by symbol count is *data*, not code: the display lists,
+# geo layouts, animations, collision, vertices, textures and lighting under
+# actors/, levels/, data/, bin/. The vast majority still carry their original
+# ROM-address placeholder names (e.g. ``birds_seg5_vertex_05000048``), so naming
+# them is the single largest documentation effort left -- yet it lives outside the
+# code symbol set entirely. We measure it on its own axis (a separate "asset data
+# named" score), broken down by asset type so a 2.5%-named vertex pile doesn't
+# blend with a 33%-named geo-layout pile. Behaviors are excluded here -- they're
+# already scored as code globals via their header declarations.
+
+ASSET_DIRS = ("actors", "levels", "data", "bin")
+
+
+def asset_bucket(name: str, type_name: Optional[str]) -> str:
+    """Group a data global into a human asset type by its declared C type/name."""
+    t = (type_name or "").replace("const", "").strip()
+    low = name.lower()
+    if "Animation" in t or "anim" in low:
+        return "animation"
+    if t.startswith("Gfx"):
+        return "display list"
+    if t.startswith("GeoLayout"):
+        return "geo layout"
+    if t.startswith("Vtx"):
+        return "vertex"
+    if t.startswith("Collision"):
+        return "collision"
+    if t.startswith("Light"):
+        return "lighting"
+    if t.startswith("LevelScript"):
+        return "level script"
+    if t.startswith("Texture") or t.startswith("ALIGNED8") or t.startswith("u8"):
+        return "texture"
+    return "level data"  # Movtex, MacroObject, Painting, RoomData, Trajectory, …
+
+
+def _extract_asset_globals(src: bytes, rel: str) -> List[Symbol]:
+    """Top-level data declarations in one asset file, tagged with an asset kind.
+
+    A single pass over the top-level declarations (data files are nothing but
+    file-scope arrays), classifying each name exactly as a code global would --
+    so a name's GOOD/placeholder verdict is identical -- then swapping the bare
+    ``global`` kind for its asset type. Behaviors are skipped (already scored as
+    code globals via their header declarations)."""
+    out: List[Symbol] = []
+    for decl in parse_source(src).root_node.named_children:
+        if decl.type != "declaration" or _is_prototype(decl):
+            continue
+        type_node = decl.child_by_field_name("type")
+        type_name = type_node.text.decode() if type_node is not None else None
+        if type_name and "BehaviorScript" in type_name:
+            continue
+        for name in _declaration_names(decl):
+            out.append(
+                Symbol(
+                    name,
+                    asset_bucket(name, type_name),
+                    classify_global_var(name),
+                    rel,
+                    decl.start_point[0] + 1,
+                    type_name,
+                )
+            )
+    return out
+
+
+def collect_assets(root: Path) -> List[Symbol]:
+    """Asset-data symbols under actors/levels/data/bin.
+
+    Kept as a *separate* list from collect_symbols, never merged, so these ~20k
+    symbols can't perturb the code completeness/uniformity scores -- they're
+    measured on their own axis (asset_report)."""
+    out: List[Symbol] = []
+    for path in sorted(root.joinpath(d) for d in ASSET_DIRS):
+        if not path.is_dir():
+            continue
+        for f in sorted(path.glob("**/*.c")):
+            rel = str(f.relative_to(root))
+            if should_ignore_file(rel):
+                continue
+            out.extend(_extract_asset_globals(f.read_bytes(), rel))
+    return out
+
+
+def asset_report(assets: List[Symbol]) -> dict:
+    """Per-asset-type named/total tallies plus the overall, lowest fraction first."""
+    by_type: Dict[str, Dict[str, int]] = {}
+    for s in assets:
+        d = by_type.setdefault(s.kind, {"named": 0, "total": 0})
+        d["total"] += 1
+        if s.classification == Classification.GOOD:
+            d["named"] += 1
+    return {
+        "total": {
+            "named": sum(d["named"] for d in by_type.values()),
+            "total": sum(d["total"] for d in by_type.values()),
+        },
+        "by_type": dict(
+            sorted(
+                by_type.items(),
+                key=lambda kv: (
+                    kv[1]["named"] / kv[1]["total"] if kv[1]["total"] else 1
+                ),
+            )
+        ),
+    }
+
+
 def _has_doc_comment(fn) -> bool:
     """True if a ``/** ... */`` block comment immediately precedes a function."""
     prev = fn.prev_sibling
@@ -967,7 +1079,11 @@ def _bar(ratio: float, width: int = 24) -> str:
 
 
 def print_report(
-    symbols: List[Symbol], top_files: int, samples: int, root: Optional[Path] = None
+    symbols: List[Symbol],
+    top_files: int,
+    samples: int,
+    root: Optional[Path] = None,
+    assets: Optional[List[Symbol]] = None,
 ) -> Tuple[float, float]:
     counts = category_counts(symbols)
     score = overall_score(counts)
@@ -1099,10 +1215,31 @@ def print_report(
                         f"  {area:<10} {c['documented']:>4}/{c['functions']:<5}"
                         f" {_bar(p / 100)} {p:4.0f}%"
                     )
+
+    # Asset data (segment data under actors/levels/data/bin), by asset type.
+    if assets:
+        rep = asset_report(assets)
+        t = rep["total"]
+        pct = 100 * t["named"] / t["total"] if t["total"] else 100.0
+        print(
+            f"\nAsset data named: {t['named']}/{t['total']} ({pct:.0f}%), by type "
+            "(mostly ROM-address placeholders still):"
+        )
+        for atype, c in rep["by_type"].items():
+            if c["total"]:
+                p = c["named"] / c["total"]
+                print(
+                    f"  {atype:<14} {c['named']:>5}/{c['total']:<6}"
+                    f" {_bar(p)} {p * 100:4.1f}%"
+                )
     return score, uscore
 
 
-def to_json(symbols: List[Symbol], root: Optional[Path] = None) -> dict:
+def to_json(
+    symbols: List[Symbol],
+    root: Optional[Path] = None,
+    assets: Optional[List[Symbol]] = None,
+) -> dict:
     counts = category_counts(symbols)
     ucounts = uniformity_counts(symbols)
     named = _named_families(symbols, MIN_FAMILY_MEMBERS)
@@ -1155,6 +1292,18 @@ def to_json(symbols: List[Symbol], root: Optional[Path] = None) -> dict:
             for f in semantic_findings
         ],
         "doc_comments": doc_comment_coverage(root) if root is not None else None,
+        "assets": asset_report(assets) if assets else None,
+        "asset_findings": [
+            {
+                "name": s.name,
+                "kind": s.kind,
+                "reason": completeness_reason(s),
+                "file": s.file,
+                "line": s.line,
+            }
+            for s in (assets or [])
+            if s.classification != Classification.GOOD
+        ],
     }
 
 
@@ -1178,8 +1327,11 @@ def main() -> int:
         return 2
 
     symbols = collect_symbols(args.root)
-    score, uscore = print_report(symbols, args.top_files, args.samples, args.root)
-    data = to_json(symbols, args.root)
+    assets = collect_assets(args.root)
+    score, uscore = print_report(
+        symbols, args.top_files, args.samples, args.root, assets
+    )
+    data = to_json(symbols, args.root, assets)
     if args.json:
         args.json.parent.mkdir(parents=True, exist_ok=True)
         args.json.write_text(json.dumps(data, indent=2))

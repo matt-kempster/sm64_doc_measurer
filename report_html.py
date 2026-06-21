@@ -30,6 +30,7 @@ _TEMPLATE = """<!doctype html>
     --bg: #0f1117; --panel: #161922; --panel2: #1c202b; --fg: #e6e8ee;
     --muted: #8b90a0; --line: #262a36; --accent: #58a6ff;
     --good: #3fb950; --mal: #d29922; --und: #f85149; --conv: #58a6ff; --sem: #a371f7;
+    --asset: #db6d28;
     --shadow: 0 1px 0 rgba(0,0,0,.3);
   }
   @media (prefers-color-scheme: light) {
@@ -37,6 +38,7 @@ _TEMPLATE = """<!doctype html>
       --bg: #ffffff; --panel: #f6f8fa; --panel2: #eef1f5; --fg: #1f2328;
       --muted: #636c76; --line: #d0d7de; --accent: #0969da;
       --good: #1a7f37; --mal: #9a6700; --und: #cf222e; --conv: #0969da; --sem: #8250df;
+      --asset: #bc4c00;
       --shadow: 0 1px 2px rgba(31,35,40,.06);
     }
   }
@@ -44,12 +46,14 @@ _TEMPLATE = """<!doctype html>
     --bg: #ffffff; --panel: #f6f8fa; --panel2: #eef1f5; --fg: #1f2328;
     --muted: #636c76; --line: #d0d7de; --accent: #0969da;
     --good: #1a7f37; --mal: #9a6700; --und: #cf222e; --conv: #0969da; --sem: #8250df;
+    --asset: #bc4c00;
     --shadow: 0 1px 2px rgba(31,35,40,.06);
   }
   :root[data-theme="dark"] {
     --bg: #0f1117; --panel: #161922; --panel2: #1c202b; --fg: #e6e8ee;
     --muted: #8b90a0; --line: #262a36; --accent: #58a6ff;
     --good: #3fb950; --mal: #d29922; --und: #f85149; --conv: #58a6ff; --sem: #a371f7;
+    --asset: #db6d28;
     --shadow: 0 1px 0 rgba(0,0,0,.3);
   }
   * { box-sizing: border-box; }
@@ -58,9 +62,24 @@ _TEMPLATE = """<!doctype html>
     font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     -webkit-font-smoothing: antialiased;
   }
-  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px 72px; }
+  .layout { display: flex; align-items: flex-start; max-width: 1360px; margin: 0 auto; }
+  .wrap { flex: 1; min-width: 0; max-width: 1120px; padding: 0 24px 72px; }
   header { display: flex; align-items: flex-start; justify-content: space-between;
            gap: 16px; padding: 24px 0 4px; }
+
+  /* sticky left sidebar: section nav + at-a-glance stat, hidden on narrow screens */
+  .sidebar { flex: none; width: 212px; align-self: flex-start; position: sticky; top: 0;
+    max-height: 100vh; overflow-y: auto; padding: 26px 10px 24px 20px; }
+  .side-title { color: var(--muted); font-size: 11px; text-transform: uppercase;
+    letter-spacing: .08em; margin: 6px 8px 8px; }
+  .nav-item { display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+    padding: 7px 10px; border-radius: 8px; cursor: pointer; color: var(--muted);
+    font-size: 13px; border-left: 2px solid transparent; }
+  .nav-item:hover { background: var(--panel); color: var(--fg); }
+  .nav-item.active { background: var(--panel); color: var(--fg); border-left-color: var(--accent); }
+  .nav-item .v { font-variant-numeric: tabular-nums; font-size: 12px; font-weight: 600;
+    color: var(--fg); }
+  @media (max-width: 900px) { .sidebar { display: none; } }
   h1 { margin: 0; font-size: 20px; letter-spacing: -.01em; }
   h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em;
        color: var(--muted); margin: 0; }
@@ -73,8 +92,8 @@ _TEMPLATE = """<!doctype html>
   .theme-btn:hover { border-color: var(--accent); }
 
   /* headline scorecards (clickable) */
-  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
-           margin: 16px 0 6px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+           gap: 14px; margin: 16px 0 6px; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
           padding: 14px 16px; box-shadow: var(--shadow); cursor: pointer; transition: border-color .12s; }
   .card:hover { border-color: var(--accent); }
@@ -138,12 +157,24 @@ _TEMPLATE = """<!doctype html>
   .tag.M { background: color-mix(in srgb, var(--mal) 20%, transparent); color: var(--mal); }
   .tag.C { background: color-mix(in srgb, var(--conv) 18%, transparent); color: var(--conv); }
   .tag.S { background: color-mix(in srgb, var(--sem) 20%, transparent); color: var(--sem); }
+  .tag.A { background: color-mix(in srgb, var(--asset) 22%, transparent); color: var(--asset); }
   .legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 4px 0 12px; font-size: 12.5px;
     color: var(--muted); }
   .legend span b { color: var(--fg); font-weight: 600; }
 </style>
 </head>
 <body>
+<div class="layout">
+  <nav class="sidebar" id="sidebar">
+    <div class="side-title">Sections</div>
+    <a class="nav-item" data-target="panel-complete"><span>Completeness</span><span class="v" id="nv-complete"></span></a>
+    <a class="nav-item" data-target="panel-assets"><span>Asset data</span><span class="v" id="nv-assets"></span></a>
+    <a class="nav-item" data-target="panel-sem"><span>Semantic</span><span class="v" id="nv-sem"></span></a>
+    <a class="nav-item" data-target="panel-uniform"><span>Uniformity</span><span class="v" id="nv-uniform"></span></a>
+    <a class="nav-item" data-target="panel-family"><span>Families</span><span class="v" id="nv-family"></span></a>
+    <a class="nav-item" data-target="doc-panel"><span>Doc comments</span><span class="v" id="nv-doc"></span></a>
+    <a class="nav-item" data-target="worklist"><span>Worklist</span><span class="v" id="nv-work"></span></a>
+  </nav>
 <div class="wrap">
   <header>
     <div>
@@ -169,17 +200,34 @@ _TEMPLATE = """<!doctype html>
       <div class="statlabel">wired up</div>
       <div class="statnote" id="semnote">entities linked to their impl →</div>
     </div>
+    <div class="card" id="card-assets">
+      <div class="score" id="ascore" style="color:var(--asset)"></div>
+      <div class="statlabel">asset data named</div>
+      <div class="statnote" id="asnote">geo / dl / anim / vtx →</div>
+    </div>
   </div>
 
-  <details class="panel" open>
+  <details class="panel" open id="panel-complete">
     <summary><h2>Completeness — do symbols have real names?</h2>
       <span class="summary-stat" id="complete-stat"></span></summary>
     <p class="sub">GOOD vs. MALFORMED (named but off-shape) vs. UNDOCUMENTED
-      (a placeholder like <code>func_8024…</code>). Click a kind to see its worklist.</p>
+      (a placeholder like <code>func_8024…</code>). This is <b>code</b> symbols;
+      asset data is scored separately below. Click a kind to see its worklist.</p>
     <div class="cats" id="cats-complete"></div>
   </details>
 
-  <details class="panel" open>
+  <details class="panel" open id="panel-assets">
+    <summary><h2>Asset data — named vs. address placeholders</h2>
+      <span class="summary-stat" id="assets-stat"></span></summary>
+    <p class="sub">Display lists, geo layouts, animations, collision, vertices, textures
+      and lighting under <code>actors/</code>, <code>levels/</code>, <code>data/</code> —
+      ~20k symbols, the largest naming effort left. Most still carry a ROM-address
+      placeholder like <code>birds_seg5_vertex_05000048</code>. Shown per asset type
+      (lowest first); click one to see its worklist.</p>
+    <div class="cats" id="cats-assets"></div>
+  </details>
+
+  <details class="panel" open id="panel-sem">
     <summary><h2>Semantic entities — are they wired up?</h2>
       <span class="summary-stat" id="sem-stat"></span></summary>
     <p class="sub">A prefix says what something is <em>called</em>; this asks whether
@@ -193,7 +241,7 @@ _TEMPLATE = """<!doctype html>
     </table>
   </details>
 
-  <details class="panel" open>
+  <details class="panel" open id="panel-uniform">
     <summary><h2>Uniformity — do those names follow convention?</h2>
       <span class="summary-stat" id="uniform-stat"></span></summary>
     <p class="sub">Of the real names, which follow the role-aware conventions
@@ -203,7 +251,7 @@ _TEMPLATE = """<!doctype html>
     <div class="cats" id="cats-uniform"></div>
   </details>
 
-  <details class="panel">
+  <details class="panel" id="panel-family">
     <summary><h2>Completeness by entity family</h2>
       <span class="summary-stat" id="family-stat"></span></summary>
     <p class="sub">Constants &amp; enums regrouped by prefix — ACT_* (Mario actions),
@@ -242,6 +290,7 @@ _TEMPLATE = """<!doctype html>
       <span><span class="tag M">M</span> <b>malformed</b> off-convention name</span>
       <span><span class="tag C">C</span> <b>convention</b> uniformity violation</span>
       <span><span class="tag S">S</span> <b>semantic</b> not wired to its impl</span>
+      <span><span class="tag A">A</span> <b>asset</b> unnamed segment data</span>
     </div>
     <div class="controls">
       <input type="search" id="q" placeholder="filter by name or file…">
@@ -250,6 +299,7 @@ _TEMPLATE = """<!doctype html>
         <option value="completeness">completeness</option>
         <option value="convention">convention</option>
         <option value="semantic">semantic</option>
+        <option value="asset">asset data</option>
       </select>
       <select id="kind"></select>
       <select id="famsel"></select>
@@ -269,6 +319,7 @@ _TEMPLATE = """<!doctype html>
       <tbody id="rows"></tbody>
     </table>
   </details>
+</div>
 </div>
 <script>
 const DATA = __DATA__;
@@ -414,6 +465,23 @@ if (DOC && DOC.total.functions) {
   document.getElementById('doc-panel').style.display = 'none';
 }
 
+// --- asset data (named vs. ROM-address placeholders), by asset type ---
+const AS = DATA.assets;
+if (AS && AS.total.total) {
+  const ar = AS.total.named / AS.total.total;
+  document.getElementById('ascore').textContent = (ar * 100).toFixed(0) + '%';
+  document.getElementById('asnote').textContent =
+    AS.total.named.toLocaleString() + '/' + AS.total.total.toLocaleString() + ' named →';
+  document.getElementById('assets-stat').textContent =
+    (AS.total.total - AS.total.named).toLocaleString() + ' to name';
+  bars('cats-assets', 'asset',
+    Object.entries(AS.by_type).map(([t, c]) => [t, c.named, c.total]));
+  document.getElementById('card-assets').addEventListener('click', () => focusWorklist({ axis: 'asset' }));
+} else {
+  document.getElementById('panel-assets').style.display = 'none';
+  document.getElementById('card-assets').style.display = 'none';
+}
+
 // --- worklist (all axes combined) ---
 const rows = [
   ...DATA.needs_attention.map(r => ({
@@ -430,6 +498,11 @@ const rows = [
     tag: 'S', axis: 'semantic',
     kind: '', family: r.entity, name: r.name, file: r.file, line: r.line,
     reason: r.detail,
+  })),
+  ...(DATA.asset_findings || []).map(r => ({
+    tag: 'A', axis: 'asset',
+    kind: r.kind, family: '', name: r.name, file: r.file, line: r.line,
+    reason: r.reason || 'ROM-address placeholder — give it a real name',
   })),
 ];
 
@@ -478,6 +551,29 @@ document.getElementById('clear').addEventListener('click', () => {
   q.value = ''; axisSel.value = ''; kindSel.value = ''; famSel.value = ''; render();
 });
 render();
+
+// --- sidebar: at-a-glance stats, click-to-jump, scroll-spy ---
+function navStat(id, val) { const e = document.getElementById(id); if (e) e.textContent = val; }
+navStat('nv-complete', (DATA.score * 100).toFixed(0) + '%');
+navStat('nv-assets', (AS && AS.total.total) ? (100 * AS.total.named / AS.total.total).toFixed(0) + '%' : '—');
+navStat('nv-sem', (semTot ? 100 * semLink / semTot : 100).toFixed(0) + '%');
+navStat('nv-uniform', ((DATA.uniformity_score ?? 1) * 100).toFixed(0) + '%');
+navStat('nv-family', String(incomplete));
+navStat('nv-doc', (DOC && DOC.total.functions) ? Math.round(100 * DOC.total.documented / DOC.total.functions) + '%' : '—');
+navStat('nv-work', rows.length.toLocaleString());
+const navItems = [...document.querySelectorAll('.nav-item')];
+navItems.forEach(a => a.addEventListener('click', () => {
+  const el = document.getElementById(a.dataset.target);
+  if (!el) return;
+  if (el.tagName === 'DETAILS') el.open = true;
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}));
+if (typeof IntersectionObserver !== 'undefined') {
+  const spy = new IntersectionObserver(es => es.forEach(en => {
+    if (en.isIntersecting) navItems.forEach(a => a.classList.toggle('active', a.dataset.target === en.target.id));
+  }), { rootMargin: '-12% 0px -80% 0px' });
+  navItems.forEach(a => { const el = document.getElementById(a.dataset.target); if (el) spy.observe(el); });
+}
 </script>
 </body>
 </html>

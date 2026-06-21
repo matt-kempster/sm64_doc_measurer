@@ -136,18 +136,53 @@ and in the JSON under `violations` / `conventions` / `uniformity_score`. Every
 completeness row carries a specific, actionable **reason** — `auto func_<addr>`,
 `raw stack slot (sp<offset>)`, `padding/filler`, … — not just "undocumented".
 
+### Asset data
+
+The categories above are *code* symbols (everything under `src/` and
+`include/`). But the bulk of the decomp by symbol count is **data** — the display
+lists, geo layouts, animations, collision, vertices, textures and lighting under
+`actors/`, `levels/`, `data/`, `bin/` — and most of it still carries its original
+ROM-address placeholder name, e.g. `birds_seg5_vertex_05000048`. Naming that data
+is the single largest documentation effort left.
+
+It's measured on its **own axis** — a fourth headline, **asset data named** — so
+it never blends into the ~88% code-completeness number, and broken down **per
+asset type** so a 2.5%-named pile of 9k vertices doesn't average away a 33%-named
+pile of geo layouts:
+
+```
+asset data named: 2316/19910 (12%), by type:
+  lighting        19/1003   ░░░░░░░░░░░░░░░░░░░░░░░░   1.9%
+  animation       17/732    █░░░░░░░░░░░░░░░░░░░░░░░   2.3%
+  vertex         219/8929   █░░░░░░░░░░░░░░░░░░░░░░░   2.5%
+  display list   341/3752   ██░░░░░░░░░░░░░░░░░░░░░░   9.1%
+  texture        752/3931   █████░░░░░░░░░░░░░░░░░░░  19.1%
+  geo layout     226/694    ████████░░░░░░░░░░░░░░░░  32.6%
+  collision      130/225    ██████████████░░░░░░░░░░  57.8%
+  level data     437/469    ██████████████████████░  93.2%
+  level script   175/175    ████████████████████████ 100.0%
+```
+
+The classifier is the same one used for code globals (the `_05000048` ROM-address
+suffix → "give it a real name"), so a name's verdict is identical to a code
+symbol's. Behaviors are excluded here (already scored as code globals via their
+header declarations). Gaps are tagged `A` in the worklist, filterable by asset
+type; the JSON carries `assets` (the per-type summary) and `asset_findings`.
+
 ### The report page
 
-The HTML is self-contained (data embedded, no external assets) and has a
-**dark/light toggle** (it follows your OS by default and remembers your choice),
-three headline scores, per-kind bars colored by health, the family and semantic
-tables, and one sortable/filterable worklist with a tag legend (`U`/`M`/`C`/`S`).
+The HTML is self-contained (data embedded, no external assets) and has a sticky
+**section sidebar** (jump to any panel, with each section's headline stat shown
+inline and the current section highlighted as you scroll), a **dark/light toggle**
+(it follows your OS by default and remembers your choice), four headline scores,
+per-kind bars colored by health, the family and semantic tables, and one
+sortable/filterable worklist with a tag legend (`U`/`M`/`C`/`S`/`A`).
 
 It's built to stay short and lead with what needs attention: each section is a
 **collapsible panel** that shows its headline stat when closed, the long family
 table collapses by default and hides fully-complete families, and **every metric
-is clickable** — a scorecard, a bar, a family, or an entity — to filter the
-worklist to it and jump straight there.
+is clickable** — a scorecard, a bar, a family, an entity, or an asset type — to
+filter the worklist to it and jump straight there.
 
 ### Documentation comments
 

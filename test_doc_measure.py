@@ -502,6 +502,85 @@ def test_file_based_entities_skipped_without_root():
     assert summaries == [] and findings == []
 
 
+def test_asset_bucket_maps_c_type():
+    assert m.asset_bucket("foo_dl", "const Gfx") == "display list"
+    assert m.asset_bucket("foo_geo", "const GeoLayout") == "geo layout"
+    assert m.asset_bucket("foo_05000048", "const Vtx") == "vertex"
+    assert m.asset_bucket("foo_collision", "Collision") == "collision"
+    assert m.asset_bucket("foo_lights", "const Lights1") == "lighting"
+    assert m.asset_bucket("foo_anim", "const struct Animation") == "animation"
+    # animation s16/u16 tables are caught by the name (type is too generic)
+    assert (
+        m.asset_bucket("birds_seg5_animindex_5000870", "static const s16")
+        == "animation"
+    )
+    assert m.asset_bucket("foo_tex", "ALIGNED8 const Texture") == "texture"
+    assert m.asset_bucket("bbh_seg7_macro_objs", "const MacroObject") == "level data"
+
+
+def test_collect_assets(tmp_path):
+    (tmp_path / "actors" / "bird").mkdir(parents=True)
+    (tmp_path / "actors" / "bird" / "model.inc.c").write_text(
+        "const Vtx birds_seg5_vertex_05000048[] = {};\n"  # address placeholder
+        "const Gfx bird_wing_dl[] = {};\n"  # real name
+        "const struct Animation birds_seg5_anim_050008D0 = {};\n"
+    )
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "behavior_data.c").write_text(
+        "const BehaviorScript bhvBird[] = {};\n"
+    )
+    by_name = {a.name: a for a in m.collect_assets(tmp_path)}
+    assert "bhvBird" not in by_name  # behaviors excluded (scored as code globals)
+    vtx = by_name["birds_seg5_vertex_05000048"]
+    assert vtx.kind == "vertex" and vtx.classification == C.UNDOCUMENTED  # ROM address
+    assert by_name["bird_wing_dl"].kind == "display list"
+    assert by_name["bird_wing_dl"].classification == C.GOOD
+    assert by_name["birds_seg5_anim_050008D0"].kind == "animation"
+
+
+def test_asset_report_per_type_lowest_first():
+    assets = [
+        m.Symbol("a_dl", "display list", C.GOOD, "x.c", 1),
+        m.Symbol("b_05000048", "display list", C.UNDOCUMENTED, "x.c", 2),
+        m.Symbol("c_05000048", "vertex", C.UNDOCUMENTED, "x.c", 3),
+    ]
+    rep = m.asset_report(assets)
+    assert rep["total"] == {"named": 1, "total": 3}
+    assert rep["by_type"]["display list"] == {"named": 1, "total": 2}
+    assert rep["by_type"]["vertex"] == {"named": 0, "total": 1}
+    # ordered lowest fraction first: vertex (0%) before display list (50%)
+    assert list(rep["by_type"]) == ["vertex", "display list"]
+
+
+def test_assets_do_not_pollute_code_scores():
+    code = syms()
+    base = m.to_json(code)
+    assert base["assets"] is None and base["asset_findings"] == []
+    assets = [
+        m.Symbol("v_05000048", "vertex", C.UNDOCUMENTED, "actors/x.c", 1),
+        m.Symbol("good_dl", "display list", C.GOOD, "actors/x.c", 2),
+    ]
+    d = m.to_json(code, assets=assets)
+    assert d["assets"]["total"] == {"named": 1, "total": 2}
+    assert len(d["asset_findings"]) == 1 and d["asset_findings"][0]["kind"] == "vertex"
+    # the asset axis is fully separate: code completeness/worklist are untouched.
+    assert d["score"] == base["score"]
+    assert d["categories"] == base["categories"]
+    assert len(d["needs_attention"]) == len(base["needs_attention"])
+
+
+def test_html_has_sidebar_and_asset_section():
+    data = m.to_json(
+        syms(),
+        assets=[m.Symbol("v_05000048", "vertex", C.UNDOCUMENTED, "actors/x.c", 1)],
+    )
+    html = report_html.render(data)
+    assert html.count("</script>") == 1
+    assert 'class="sidebar"' in html and html.count('class="nav-item"') == 7
+    assert 'id="panel-assets"' in html and 'id="card-assets"' in html
+    assert "asset data named" in html
+
+
 def test_html_has_theme_toggle_and_reason(tmp_path):
     data = m.to_json(syms())
     html = report_html.render(data, label="x")
