@@ -223,6 +223,23 @@ def classify_global_var(name: str) -> Classification:
     return Classification.GOOD
 
 
+def classify_constant(name: str) -> Classification:
+    """Completeness for #define constants and enum members (placeholder check).
+
+    Casing is checked separately on the uniformity axis; here we only ask whether
+    the name is a placeholder: an explicit unknown/unused marker, a D_-name, or a
+    trailing hex address (a run of >=4 hex digits, with at least one numeral so
+    real words like SURFACE/DEFAULT aren't caught).
+    """
+    upper = name.upper()
+    if "UNK" in upper or "UNUSED" in upper or name.startswith("D_"):
+        return Classification.UNDOCUMENTED
+    tail = name.rsplit("_", 1)[-1]
+    if re.fullmatch(r"[0-9A-Fa-f]{4,}", tail) and any(c.isdigit() for c in tail):
+        return Classification.UNDOCUMENTED
+    return Classification.GOOD
+
+
 # --------------------------------------------------------------------------- #
 # Extraction
 # --------------------------------------------------------------------------- #
@@ -236,6 +253,8 @@ CLASSIFIERS = {
     "struct": classify_struct_name,
     "member": classify_struct_member,
     "global": classify_global_var,
+    "constant": classify_constant,  # object-like #define
+    "enum": classify_constant,  # enum member
 }
 
 
@@ -264,11 +283,12 @@ def _classify(name: str, kind: str) -> Classification:
 # legible separately.
 
 # Kinds that carry a convention rule (args/locals have no settled casing rule).
-CONVENTION_KINDS = ("function", "struct", "member", "global")
+CONVENTION_KINDS = ("function", "struct", "member", "global", "constant", "enum")
 
 _SNAKE = re.compile(r"[a-z][a-z0-9_]*$")  # set_mario_action, dialog_table_eu_en
 _PASCAL = re.compile(r"[A-Z][A-Za-z0-9]*$")  # MarioState
 _CAMEL = re.compile(r"[a-z][A-Za-z0-9]*$")  # rawStickX
+_UPPER_SNAKE = re.compile(r"[A-Z][A-Z0-9_]*$")  # ACT_WALKING, SOUND_GENERAL_COIN
 _BHV = re.compile(r"bhv[A-Z]")  # bhvStarDoor
 _GLOBAL_PREFIX = re.compile(r"(?:[gs]|gd|bhv)[A-Z]")  # gMarioState, sCount, gdFoo
 
@@ -294,6 +314,9 @@ def convention_violation(sym: Symbol) -> Optional[str]:
         if _GLOBAL_PREFIX.match(name) or _SNAKE.match(name) or name.startswith("_"):
             return None
         return "global should have a g/s prefix"
+    elif sym.kind in ("constant", "enum"):
+        if not _UPPER_SNAKE.match(name):
+            return "constant should be UPPER_SNAKE"
     return None
 
 
@@ -373,7 +396,32 @@ def extract_source(src: bytes, rel: str) -> List[Symbol]:
         for name in _declaration_names(decl):
             add(name, "global", decl, type_name)
 
+    # Object-like #define constants. Skip include guards (they aren't real
+    # constants): names ending in _H / _H_, or wrapped in underscores (_SM64_H_).
+    for d in _iter(root, "preproc_def"):
+        nm = d.child_by_field_name("name")
+        if nm is None:
+            continue
+        name = nm.text.decode()
+        if _is_include_guard(name):
+            continue
+        add(name, "constant", d)
+
+    # Enum members.
+    for e in _iter(root, "enumerator"):
+        nm = e.child_by_field_name("name")
+        if nm is not None:
+            add(nm.text.decode(), "enum", e)
+
     return symbols
+
+
+def _is_include_guard(name: str) -> bool:
+    return bool(
+        re.search(r"_H_?$", name)  # SM64_H, MACROS_H_
+        or (name.startswith("_") and name.endswith("_"))  # _SM64_H_
+        or name.endswith("_GUARD")
+    )
 
 
 def should_ignore_file(rel: str) -> bool:

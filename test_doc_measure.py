@@ -187,6 +187,44 @@ def test_to_json_has_uniformity_block():
     assert isinstance(d["violations"], list)
 
 
+CONST_SOURCE = b"""
+#ifndef _TEST_H_
+#define _TEST_H_
+#define ACT_WALKING 0x04
+#define ACT_UNKNOWN_5 0x05
+#define SURFACE_DEFAULT 0x00
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+enum Foo { FOO_A, FOO_B, special_lowercase, macro_unknown_28 };
+#endif
+"""
+
+
+def test_defines_and_enums_extracted():
+    s = m.extract_source(CONST_SOURCE, "x.h")
+    constants = {x.name for x in s if x.kind == "constant"}
+    enums = {x.name for x in s if x.kind == "enum"}
+    assert {"ACT_WALKING", "ACT_UNKNOWN_5", "SURFACE_DEFAULT"} <= constants
+    assert "_TEST_H_" not in constants  # include guard skipped
+    assert "MIN" not in constants  # function-like macro is not a constant
+    assert {"FOO_A", "FOO_B", "special_lowercase", "macro_unknown_28"} <= enums
+
+
+def test_constant_placeholder_classification():
+    assert m.classify_constant("ACT_WALKING") == C.GOOD
+    assert m.classify_constant("SURFACE_DEFAULT") == C.GOOD  # no hex/address FP
+    assert m.classify_constant("ACT_UNKNOWN_5") == C.UNDOCUMENTED
+    assert m.classify_constant("MODEL_DOOR_UNUSED") == C.UNDOCUMENTED
+    assert m.classify_constant("FOO_80339876") == C.UNDOCUMENTED  # trailing address
+    assert m.classify_constant("D_8033") == C.UNDOCUMENTED
+
+
+def test_constant_upper_snake_convention():
+    assert m.convention_violation(mksym("ACT_WALKING", "constant")) is None
+    assert m.convention_violation(mksym("SOUND_GENERAL_COIN", "enum")) is None
+    assert m.convention_violation(mksym("macro_yellow_coin_1", "enum"))
+    assert m.convention_violation(mksym("AddToGroup", "constant"))  # goddard PascalCase
+
+
 def test_preproc_blanking_keeps_guarded_code():
     src = b"""
 #ifdef VERSION_JP
