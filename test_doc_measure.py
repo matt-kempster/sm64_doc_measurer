@@ -213,9 +213,20 @@ def test_constant_placeholder_classification():
     assert m.classify_constant("ACT_WALKING") == C.GOOD
     assert m.classify_constant("SURFACE_DEFAULT") == C.GOOD  # no hex/address FP
     assert m.classify_constant("ACT_UNKNOWN_5") == C.UNDOCUMENTED
-    assert m.classify_constant("MODEL_DOOR_UNUSED") == C.UNDOCUMENTED
     assert m.classify_constant("FOO_80339876") == C.UNDOCUMENTED  # trailing address
     assert m.classify_constant("D_8033") == C.UNDOCUMENTED
+
+
+def test_unused_is_documented_not_a_defect():
+    # "unused" records real knowledge (matching decomp must keep unused content);
+    # only the address-named ones are still incomplete. (UNK = ignorance, stays.)
+    assert m.classify_constant("MODEL_DOOR_UNUSED") == C.GOOD
+    assert m.classify_constant("SOUND_MENU_UNUSED") == C.GOOD
+    assert m.classify_constant("UNUSED_COUNT_80333EE8") == C.UNDOCUMENTED  # address
+    assert m.classify_constant("ACT_UNKNOWN_5") == C.UNDOCUMENTED  # unknown != unused
+    assert m.classify_global_var("unused_ice_shard") == C.GOOD
+    assert m.classify_global_var("gUnusedLoadedPool") == C.GOOD
+    assert m.classify_global_var("sUnused80226B40") == C.UNDOCUMENTED  # address
 
 
 def test_constant_upper_snake_convention():
@@ -262,33 +273,25 @@ def test_to_json_has_families_and_row_family():
         assert "family" in row
 
 
-def test_semantic_mario_actions_crossref():
-    src = b"#define ACT_WALKING 0x04\n#define ACT_NO_HANDLER 0x05\nvoid act_walking(void) {}\n"
-    s = m.extract_source(src, "include/sm64.h")
-    summaries, findings = m.semantic_report(s)
-    action = next(x for x in summaries if x["entity"] == "Mario action")
-    assert action["members"] == 2 and action["linked"] == 1 and action["gaps"] == 1
-    names = {f.name for f in findings}
-    assert "ACT_NO_HANDLER" in names and "ACT_WALKING" not in names
-
-
-def test_semantic_excludes_course_acts():
-    # ACT_1..ACT_6 in model_ids.h are course acts, not Mario actions.
-    s = m.extract_source(b"#define ACT_1 (1 << 0)\n", "include/model_ids.h")
-    summaries, _ = m.semantic_report(s)
-    assert next(x for x in summaries if x["entity"] == "Mario action")["members"] == 0
-
-
 def test_to_json_has_semantic_and_no_family_uniformity():
-    d = m.to_json(
-        m.extract_source(
-            b"#define ACT_WALKING 1\nvoid act_walking(void){}\n", "include/sm64.h"
-        )
-    )
+    d = m.to_json(m.extract_source(FAMILY_SOURCE, "f.c"))
     assert "semantic_entities" in d and "semantic_findings" in d
     # per-family uniformity was tautological and is gone.
     if d["families"]:
         assert "conforming" not in next(iter(d["families"].values()))
+
+
+def test_typedef_struct_members_extracted():
+    # The bulk of SM64's types are anonymous `typedef struct { ... } Name;`. They
+    # were previously skipped (no struct tag), under-counting structs and members.
+    src = b"typedef struct { s16 health; u8 unk02; } MarioBodyState;\n"
+    s = m.extract_source(src, "x.h")
+    assert find(s, "struct", "MarioBodyState").classification == C.GOOD
+    assert find(s, "member", "health").classification == C.GOOD
+    assert find(s, "member", "unk02").classification == C.UNDOCUMENTED
+    # A named typedef must not be double-counted as a struct.
+    s2 = m.extract_source(b"typedef struct Foo { s32 x; } Foo;\n", "x.h")
+    assert len([x for x in s2 if x.kind == "struct" and x.name == "Foo"]) == 1
 
 
 def test_completeness_reason_is_specific_and_actionable():
@@ -314,7 +317,7 @@ def test_to_json_needs_attention_has_reason():
     assert rows and all(r["reason"] for r in rows)
 
 
-# --- semantic entities that read extra repo files (Dialog/Cutscene/Level/Seq) --- #
+# --- semantic entities that read extra repo files (Dialog / Level / Sequence) --- #
 
 
 def _summary_for(symbols, root, entity):
@@ -334,22 +337,6 @@ def test_semantic_dialog_crossref(tmp_path):
     summary, gaps = _summary_for(symbols, tmp_path, "Dialog")
     assert summary["members"] == 2 and summary["linked"] == 1  # NONE excluded
     assert gaps == {"DIALOG_001"}
-
-
-def test_semantic_cutscene_crossref(tmp_path):
-    (tmp_path / "src" / "game").mkdir(parents=True)
-    (tmp_path / "src" / "game" / "camera.c").write_text(
-        "    CUTSCENE(CUTSCENE_ENTER_CANNON, sCutsceneEnterCannon)\n"
-    )
-    src = (
-        b"#define CUTSCENE_ENTER_CANNON 1\n"
-        b"#define CUTSCENE_DANCE 2\n"
-        b"#define CUTSCENE_STOP 0x8000\n"
-    )
-    symbols = m.extract_source(src, "src/game/camera.h")
-    summary, gaps = _summary_for(symbols, tmp_path, "Cutscene")
-    assert summary["members"] == 2  # STOP sentinel excluded
-    assert gaps == {"CUTSCENE_DANCE"}
 
 
 def test_semantic_level_crossref(tmp_path):
@@ -388,12 +375,11 @@ def test_semantic_sequence_crossref(tmp_path):
 
 
 def test_file_based_entities_skipped_without_root():
-    # With no repo root, file-reading checks return None and don't appear.
+    # Every semantic entity now reads repo files (only links the decomp is required
+    # to have); with no root, none can run, so the section is empty rather than noisy.
     symbols = m.extract_source(b"#define ACT_WALKING 1\n", "include/sm64.h")
-    summaries, _ = m.semantic_report(symbols, root=None)
-    names = {x["entity"] for x in summaries}
-    assert "Mario action" in names  # symbol-only check still runs
-    assert "Dialog" not in names and "Level" not in names
+    summaries, findings = m.semantic_report(symbols, root=None)
+    assert summaries == [] and findings == []
 
 
 def test_html_has_theme_toggle_and_reason(tmp_path):

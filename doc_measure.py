@@ -131,6 +131,22 @@ def _is_prototype(decl) -> bool:
     return False
 
 
+def _typedef_name(td) -> Optional[str]:
+    """The new type name introduced by a ``type_definition`` (the typedef name).
+
+    It's a ``type_identifier`` under the declarator; for pointer typedefs it's
+    nested. Only look inside the declarator, never the struct body (whose member
+    types are also type_identifiers)."""
+    d = td.child_by_field_name("declarator")
+    if d is not None:
+        if d.type == "type_identifier":
+            return d.text.decode()
+        ti = next(_iter(d, "type_identifier"), None)
+        return ti.text.decode() if ti is not None else None
+    tids = [c for c in td.children if c.type == "type_identifier"]
+    return tids[-1].text.decode() if tids else None
+
+
 # --------------------------------------------------------------------------- #
 # Classification (ported verbatim from the original sm64_parse.py heuristics)
 # --------------------------------------------------------------------------- #
@@ -218,7 +234,11 @@ def classify_global_var(name: str) -> Classification:
         or (name.startswith("bhv") and name[-1].isdigit())
     ):
         return Classification.UNDOCUMENTED
-    if name[0].isupper() or name.startswith("unused"):
+    # "unused" is not a defect (a matching decomp must keep unused data, and
+    # naming it ``unused_ice_shard`` / ``gUnusedLoadedPool`` is correct). The
+    # address-named ones (``sUnused80226B40``) are already caught above by the hex
+    # rule, so only the casing convention matters here.
+    if name[0].isupper():
         return Classification.MALFORMED
     return Classification.GOOD
 
@@ -227,12 +247,19 @@ def classify_constant(name: str) -> Classification:
     """Completeness for #define constants and enum members (placeholder check).
 
     Casing is checked separately on the uniformity axis; here we only ask whether
-    the name is a placeholder: an explicit unknown/unused marker, a D_-name, or a
-    trailing hex address (a run of >=4 hex digits, with at least one numeral so
-    real words like SURFACE/DEFAULT aren't caught).
+    the name is a placeholder: an unknown marker, a D_-name, or a trailing hex
+    address (a run of >=4 hex digits, with at least one numeral so real words like
+    SURFACE/DEFAULT aren't caught).
+
+    NOTE: "unused" is deliberately *not* a defect. In a matching decompilation,
+    unused content is required to stay, and naming it ``..._UNUSED`` (e.g.
+    ``MODEL_DOOR_UNUSED``) is the documented, correct thing to do -- it records
+    real knowledge ("this is unused"), unlike ``UNK``, which records ignorance.
+    Only the address tail (``UNUSED_COUNT_80333EE8``) is still flagged, as a name
+    that hasn't actually been figured out.
     """
     upper = name.upper()
-    if "UNK" in upper or "UNUSED" in upper or name.startswith("D_"):
+    if "UNK" in upper or name.startswith("D_"):
         return Classification.UNDOCUMENTED
     tail = name.rsplit("_", 1)[-1]
     if re.fullmatch(r"[0-9A-Fa-f]{4,}", tail) and any(c.isdigit() for c in tail):
@@ -433,15 +460,22 @@ def family_counts(
 # --------------------------------------------------------------------------- #
 #
 # A prefix family answers "what's it called?"; a *semantic* entity answers "is it
-# wired up?" -- by relating a symbol to its implementation. The check is not
-# tautological because it crosses kinds (and often crosses files/representations:
-# a C enum to a data-table macro, a level constant to its script). Each entity is
-# domain knowledge, so this is a small curated registry.
+# wired up?" -- by relating a symbol to its implementation across files. The check
+# is not tautological (it crosses kinds and representations: a C enum to a
+# data-table macro, a level constant to its script).
+#
+# IMPORTANT scoping rule, learned the hard way: only check links the decomp is
+# *required* to have for a correct, matching build -- text for every dialog, a
+# script for every level, audio for every sequence. A *missing* counterpart there
+# is a genuine gap. Do NOT check merely-conventional, optional links: every
+# ACT_/CUTSCENE_ does not need its own handler/dispatch entry (handlers are often
+# shared or inlined, and that's how the original game is built), so "no handler"
+# is not a defect -- it's noise. Those checks were tried and removed.
 
 
 @dataclass(frozen=True)
 class SemanticFinding:
-    entity: str  # e.g. "Mario action"
+    entity: str  # e.g. "Dialog"
     name: str  # the member missing its link
     detail: str  # what's missing
     file: str
@@ -467,39 +501,6 @@ class SemanticContext:
             return None
 
 
-def _entity_mario_actions(ctx: SemanticContext):
-    """A Mario action (ACT_X) should have an act_x handler function.
-
-    Scoped to sm64.h: the ACT_* there are Mario's action state machine. (The
-    ACT_1..ACT_6 in model_ids.h are *course acts* -- a different meaning sharing
-    the prefix -- and ACT_FLAG_/GROUP_/ID_ are flag/group sub-families, not
-    actions.) This precision is the point: a prefix alone would conflate them.
-    """
-    funcs = {s.name for s in ctx.symbols if s.kind == "function"}
-    actions = [
-        s
-        for s in ctx.symbols
-        if s.kind == "constant"
-        and s.file.endswith("sm64.h")
-        and s.name.startswith("ACT_")
-        and not s.name.startswith(("ACT_FLAG_", "ACT_GROUP_", "ACT_ID_"))
-        and s.name != "ACT_UNINITIALIZED"
-    ]
-    findings: List[SemanticFinding] = []
-    for s in actions:
-        handler = "act_" + s.name[len("ACT_") :].lower()
-        if handler not in funcs:
-            findings.append(
-                SemanticFinding(
-                    "Mario action", s.name, f"no {handler}() handler", s.file, s.line
-                )
-            )
-    return (
-        _summary("Mario action", "ACT_X ⟷ act_x() handler", actions, findings),
-        findings,
-    )
-
-
 def _entity_dialogs(ctx: SemanticContext):
     """A numbered dialog ID (DIALOG_NNN) should have on-screen text.
 
@@ -523,38 +524,6 @@ def _entity_dialogs(ctx: SemanticContext):
         if s.name not in defined
     ]
     return _summary("Dialog", "DIALOG_NNN ⟷ on-screen text", ids, findings), findings
-
-
-def _entity_cutscenes(ctx: SemanticContext):
-    """A cutscene (CUTSCENE_X) should be wired into the cutscene dispatcher.
-
-    The CUTSCENE_* defines are in src/game/camera.h; each playable one appears as
-    CUTSCENE(CUTSCENE_X, sCutsceneX) in the dispatch table in camera.c. (STOP/LOOP
-    are sentinels, not cutscenes.) The dispatch macro is ground truth -- some
-    cutscenes share a data table, so a name transform alone would misjudge them."""
-    src = ctx.read("src/game/camera.c")
-    if src is None:
-        return None
-    dispatched = set(re.findall(r"CUTSCENE\(\s*(CUTSCENE_\w+)", src))
-    cutscenes = [
-        s
-        for s in ctx.symbols
-        if s.kind == "constant"
-        and s.file.endswith("camera.h")
-        and s.name.startswith("CUTSCENE_")
-        and s.name not in ("CUTSCENE_STOP", "CUTSCENE_LOOP")
-    ]
-    findings = [
-        SemanticFinding(
-            "Cutscene", s.name, "not in the cutscene dispatcher", s.file, s.line
-        )
-        for s in cutscenes
-        if s.name not in dispatched
-    ]
-    return (
-        _summary("Cutscene", "CUTSCENE_X ⟷ dispatcher entry", cutscenes, findings),
-        findings,
-    )
 
 
 def _entity_sequences(ctx: SemanticContext):
@@ -644,9 +613,7 @@ def _summary(entity: str, link: str, members, findings) -> dict:
 # Each entry: (SemanticContext) -> (summary dict, [SemanticFinding]) or None when
 # the check can't run (e.g. a file-based check with no repo root available).
 SEMANTIC_ENTITIES = [
-    _entity_mario_actions,
     _entity_dialogs,
-    _entity_cutscenes,
     _entity_levels,
     _entity_sequences,
 ]
@@ -708,29 +675,36 @@ def extract_source(src: bytes, rel: str) -> List[Symbol]:
                 for name in _declaration_names(decl):
                     add(name, "local", decl)
 
-    # Structs and their members. Skip Dummy* (bss-reorder padding structs).
-    for st in _iter(root, "struct_specifier"):
-        name_node = st.child_by_field_name("name")
-        body = st.child_by_field_name("body")
-        if name_node is None or body is None:
-            continue
-        sname = name_node.text.decode()
-        if re.match(r"Dummy[0-9]+$", sname):
-            continue
-        members = [
-            n
-            for fd in body.named_children
-            if fd.type == "field_declaration"
-            for n in _declaration_names(fd)
-        ]
-        if not members:  # forward-ish decl with no fields; nothing to score
-            continue
-        add(sname, "struct", st)
-        for fd in body.named_children:
-            if fd.type != "field_declaration":
-                continue
+    # Structs and their members, in both forms the decomp uses:
+    #   struct Foo { ... };               (named struct_specifier)
+    #   typedef struct { ... } Foo;       (anonymous struct, name from the typedef)
+    # The second is the bulk of SM64's types; missing it under-counted structs and
+    # all their members. Skip Dummy* (bss-reorder padding structs).
+    def add_struct(sname: Optional[str], struct_node):
+        body = struct_node.child_by_field_name("body")
+        if not sname or body is None or re.match(r"Dummy[0-9]+$", sname):
+            return
+        fields = [fd for fd in body.named_children if fd.type == "field_declaration"]
+        if not any(_declaration_names(fd) for fd in fields):
+            return  # forward-ish decl with no named fields; nothing to score
+        add(sname, "struct", struct_node)
+        for fd in fields:
             for mname in _declaration_names(fd):
                 add(mname, "member", fd)
+
+    for st in _iter(root, "struct_specifier"):
+        name_node = st.child_by_field_name("name")
+        if name_node is not None:
+            add_struct(name_node.text.decode(), st)
+
+    # Anonymous typedef'd structs: the struct_specifier has no name, so take the
+    # type name from the typedef's declarator. (Named typedefs like
+    # `typedef struct Foo {} Foo;` are already handled by the loop above.)
+    for td in _iter(root, "type_definition"):
+        struct = next((c for c in td.children if c.type == "struct_specifier"), None)
+        if struct is None or struct.child_by_field_name("name") is not None:
+            continue
+        add_struct(_typedef_name(td), struct)
 
     # Global variables: top-level declarations that aren't prototypes. Capture
     # the declared type so role-aware rules can fire (e.g. BehaviorScript).
