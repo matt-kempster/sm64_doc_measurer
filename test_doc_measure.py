@@ -1,6 +1,10 @@
 """Tests for the modernized tree-sitter engine (doc_measure.py)."""
 
+import json
+import re
+
 import doc_measure as m
+import report_html
 from doc_measure import Classification as C
 
 # A snippet that exercises every symbol category, with a deliberate mix of
@@ -102,6 +106,37 @@ def test_allcaps_macro_not_counted_as_function():
     src = b"s32 BAD_RETURN(s32) real_func(void) { s32 i; return i; }\n"
     fns = {s.name for s in m.extract_source(src, "x.c") if s.kind == "function"}
     assert "BAD_RETURN" not in fns
+
+
+def test_html_report_embeds_parseable_json():
+    data = m.to_json(syms())
+    html = report_html.render(data, label="test build")
+    assert "<!doctype html>" in html
+    assert html.count("</script>") == 1  # embedded data didn't close it early
+    assert "test build" in html
+    blob = re.search(r"const DATA = (\{.*?\});", html, re.S).group(1)
+    parsed = json.loads(blob)
+    assert parsed["categories"].keys() == data["categories"].keys()
+    assert len(parsed["needs_attention"]) == len(data["needs_attention"])
+
+
+def test_html_report_escapes_script_close():
+    # A symbol name containing "</script>" must not break out of the <script>.
+    data = {
+        "score": 1.0,
+        "categories": {},
+        "needs_attention": [
+            {
+                "name": "</script>",
+                "kind": "global",
+                "classification": "MALFORMED",
+                "file": "x.c",
+                "line": 1,
+            }
+        ],
+    }
+    html = report_html.render(data)
+    assert html.count("</script>") == 1
 
 
 def test_preproc_blanking_keeps_guarded_code():

@@ -19,7 +19,7 @@ required** — point it at any clone and go.
 
 ```sh
 pip install -r requirements.txt
-python3 doc_measure.py /path/to/sm64 --json out.json
+python3 doc_measure.py /path/to/sm64 --json out.json --html site/index.html
 ```
 
 It prints a per-category completeness table and then *what needs attention
@@ -40,7 +40,16 @@ OVERALL                 ██████████████████�
 ```
 
 `--json` writes the full result, including every symbol needing attention, for
-feeding a dashboard or a "good first issue" list.
+feeding a dashboard or a "good first issue" list. `--html` writes a
+self-contained report page (data embedded, no external assets) with the
+completeness bars and a sortable/filterable worklist.
+
+### Hosted report (GitHub Pages)
+
+`.github/workflows/pages.yml` checks out the latest `n64decomp/sm64`, runs the
+measurer, and publishes the HTML report to GitHub Pages — on every push, weekly,
+or on demand. To turn it on: **Settings → Pages → Build and deployment →
+Source: GitHub Actions**.
 
 ### Notes / caveats
 

@@ -1,0 +1,69 @@
+name: Measure & deploy report
+
+# Builds the current-state documentation report against the latest n64decomp/sm64
+# and publishes it to GitHub Pages. Enable Pages first:
+#   Settings → Pages → Build and deployment → Source: GitHub Actions.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Mondays 06:00 UTC — track the decomp as it moves
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deploy finish; don't pile up.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the measurer
+        uses: actions/checkout@v4
+
+      - name: Check out n64decomp/sm64
+        uses: actions/checkout@v4
+        with:
+          repository: n64decomp/sm64
+          path: sm64
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Build report
+        run: |
+          REV=$(git -C sm64 rev-parse --short HEAD)
+          DATE=$(date -u +%Y-%m-%d)
+          python doc_measure.py sm64 \
+            --json site/data.json \
+            --html site/index.html \
+            --label "n64decomp/sm64 @ $REV — $DATE"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -449,6 +449,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("root", metavar="PATH_TO_SM64_SOURCE_DIR", type=Path)
     parser.add_argument("--json", metavar="FILE", type=Path, help="write full results")
+    parser.add_argument(
+        "--html", metavar="FILE", type=Path, help="write a self-contained report page"
+    )
+    parser.add_argument("--label", default="", help="header text for the HTML report")
     parser.add_argument("--top-files", type=int, default=20)
     parser.add_argument("--samples", type=int, default=10)
     args = parser.parse_args()
@@ -462,9 +466,17 @@ def main() -> int:
 
     symbols = collect_symbols(args.root)
     score = print_report(symbols, args.top_files, args.samples)
+    data = to_json(symbols)
     if args.json:
-        args.json.write_text(json.dumps(to_json(symbols), indent=2))
+        args.json.parent.mkdir(parents=True, exist_ok=True)
+        args.json.write_text(json.dumps(data, indent=2))
         print(f"\nWrote {args.json}")
+    if args.html:
+        import report_html
+
+        args.html.parent.mkdir(parents=True, exist_ok=True)
+        args.html.write_text(report_html.render(data, args.label))
+        print(f"Wrote {args.html}")
     print(f"\nfinal score: {score * 100:.4f}%")
     return 0
 

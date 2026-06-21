@@ -3,6 +3,7 @@ doc_cache/
 
 # Generated static site
 _site/
+site/
 
 # VSCode
 .vscode/
