@@ -291,6 +291,119 @@ def test_to_json_has_semantic_and_no_family_uniformity():
         assert "conforming" not in next(iter(d["families"].values()))
 
 
+def test_completeness_reason_is_specific_and_actionable():
+    s = syms()
+    # Every flagged symbol gets a non-empty, specific reason.
+    for x in s:
+        if x.classification != C.GOOD:
+            assert m.completeness_reason(x), x.name
+        else:
+            assert m.completeness_reason(x) == ""
+    # Spot-check that the reason names the actual pattern, not just "undocumented".
+    assert "func_" in m.completeness_reason(find(s, "function", "func_80246EE0"))
+    assert "D_" in m.completeness_reason(find(s, "global", "D_80339876"))
+    assert "unk" in m.completeness_reason(find(s, "member", "unk02"))
+    assert "stack slot" in m.completeness_reason(find(s, "local", "sp1C"))
+    assert "arg" in m.completeness_reason(find(s, "arg", "arg0"))
+    assert "filler" in m.completeness_reason(find(s, "member", "filler"))
+    assert "uppercase" in m.completeness_reason(find(s, "global", "UnusedThing"))
+
+
+def test_to_json_needs_attention_has_reason():
+    rows = m.to_json(syms())["needs_attention"]
+    assert rows and all(r["reason"] for r in rows)
+
+
+# --- semantic entities that read extra repo files (Dialog/Cutscene/Level/Seq) --- #
+
+
+def _summary_for(symbols, root, entity):
+    summaries, findings = m.semantic_report(symbols, root)
+    summary = next((x for x in summaries if x["entity"] == entity), None)
+    gaps = {f.name for f in findings if f.entity == entity}
+    return summary, gaps
+
+
+def test_semantic_dialog_crossref(tmp_path):
+    (tmp_path / "text" / "us").mkdir(parents=True)
+    (tmp_path / "text" / "us" / "dialogs.h").write_text(
+        'DEFINE_DIALOG(DIALOG_000, 1, 6, 30, 200, _("hi"))\n'
+    )
+    src = b"enum DialogId { DIALOG_000, DIALOG_001, DIALOG_NONE };\n"
+    symbols = m.extract_source(src, "include/dialog_ids.h")
+    summary, gaps = _summary_for(symbols, tmp_path, "Dialog")
+    assert summary["members"] == 2 and summary["linked"] == 1  # NONE excluded
+    assert gaps == {"DIALOG_001"}
+
+
+def test_semantic_cutscene_crossref(tmp_path):
+    (tmp_path / "src" / "game").mkdir(parents=True)
+    (tmp_path / "src" / "game" / "camera.c").write_text(
+        "    CUTSCENE(CUTSCENE_ENTER_CANNON, sCutsceneEnterCannon)\n"
+    )
+    src = (
+        b"#define CUTSCENE_ENTER_CANNON 1\n"
+        b"#define CUTSCENE_DANCE 2\n"
+        b"#define CUTSCENE_STOP 0x8000\n"
+    )
+    symbols = m.extract_source(src, "src/game/camera.h")
+    summary, gaps = _summary_for(symbols, tmp_path, "Cutscene")
+    assert summary["members"] == 2  # STOP sentinel excluded
+    assert gaps == {"CUTSCENE_DANCE"}
+
+
+def test_semantic_level_crossref(tmp_path):
+    (tmp_path / "levels" / "bbh").mkdir(parents=True)
+    (tmp_path / "levels" / "bbh" / "script.c").write_text(
+        "const LevelScript level_bbh_entry[] = {};\n"
+    )
+    (tmp_path / "levels").mkdir(exist_ok=True)
+    (tmp_path / "levels" / "level_defines.h").write_text(
+        'DEFINE_LEVEL("BBH", LEVEL_BBH, COURSE_BBH, bbh, spooky, 1, 0, 0, 0, _, _)\n'
+        'DEFINE_LEVEL("GONE", LEVEL_GONE, COURSE_GONE, gone, x, 1, 0, 0, 0, _, _)\n'
+    )
+    summary, gaps = _summary_for([], tmp_path, "Level")
+    assert summary["members"] == 2 and summary["linked"] == 1
+    assert gaps == {"LEVEL_GONE"}
+
+
+def test_semantic_sequence_crossref(tmp_path):
+    (tmp_path / "sound").mkdir()
+    (tmp_path / "sound" / "sequences.json").write_text(
+        '{"00_sound_player": [], "03_level_grass": [], "01_cutscene_collect_star": []}'
+    )
+    src = (
+        b"enum SeqId {\n"
+        b"  SEQ_SOUND_PLAYER,\n"
+        b"  SEQ_LEVEL_GRASS,\n"
+        b"  SEQ_EVENT_CUTSCENE_COLLECT_STAR,\n"  # EVENT_ infix dropped in manifest
+        b"  SEQ_MISSING,\n"
+        b"  SEQ_COUNT\n"
+        b"};\n"
+    )
+    symbols = m.extract_source(src, "include/seq_ids.h")
+    summary, gaps = _summary_for(symbols, tmp_path, "Music sequence")
+    assert summary["members"] == 4  # SEQ_COUNT excluded
+    assert gaps == {"SEQ_MISSING"}
+
+
+def test_file_based_entities_skipped_without_root():
+    # With no repo root, file-reading checks return None and don't appear.
+    symbols = m.extract_source(b"#define ACT_WALKING 1\n", "include/sm64.h")
+    summaries, _ = m.semantic_report(symbols, root=None)
+    names = {x["entity"] for x in summaries}
+    assert "Mario action" in names  # symbol-only check still runs
+    assert "Dialog" not in names and "Level" not in names
+
+
+def test_html_has_theme_toggle_and_reason(tmp_path):
+    data = m.to_json(syms())
+    html = report_html.render(data, label="x")
+    assert "__DATA__" not in html and "__LABEL__" not in html  # tokens substituted
+    assert 'id="theme"' in html and "data-theme" in html
+    assert "prefers-color-scheme" in html
+
+
 def test_preproc_blanking_keeps_guarded_code():
     src = b"""
 #ifdef VERSION_JP

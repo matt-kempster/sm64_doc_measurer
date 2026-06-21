@@ -293,6 +293,51 @@ _BHV = re.compile(r"bhv[A-Z]")  # bhvStarDoor
 _GLOBAL_PREFIX = re.compile(r"(?:[gs]|gd|bhv)[A-Z]")  # gMarioState, sCount, gdFoo
 
 
+def completeness_reason(sym: Symbol) -> str:
+    """A specific, actionable reason a symbol is flagged on the completeness axis.
+
+    The classifiers return only GOOD/MALFORMED/UNDOCUMENTED; this names the actual
+    pattern -- "auto func_<addr>", "unk field", "sp<offset> stack slot" -- so the
+    worklist tells a contributor *what to do*, not just that something is wrong.
+    """
+    if sym.classification == Classification.GOOD:
+        return ""
+    name = sym.name
+    low = name.lower()
+    if sym.classification == Classification.UNDOCUMENTED:
+        if low.startswith("func") or low.startswith("proc8"):
+            return "auto-generated name (func_<addr>) — give it a real name"
+        if name.startswith("D_"):
+            return "auto-generated data symbol (D_<addr>) — give it a real name"
+        if low.startswith("unk") or low.startswith("u_") or low.startswith("d_"):
+            return "unknown field (unk…) — identify and name it"
+        if "unused" in low:
+            return "marked unused — name it or remove it"
+        if re.match(r"sp[0-9A-Fa-f]+$", name):
+            return "raw stack slot (sp<offset>) — give it a real name"
+        if name.startswith("arg") or re.fullmatch(r"a[0-9]", name):
+            return "positional placeholder (arg<n>) — name the parameter"
+        if re.fullmatch(r"[abf][0-9]+", name) or re.match(r"val[0-9A-Fa-f]*$", name):
+            return "register/temp placeholder — give it a real name"
+        if re.search(r"[0-9A-Fa-f]{4,}", name):
+            return "embedded ROM address in name — give it a real name"
+        if len(name) == 1:
+            return "single-letter placeholder — give it a descriptive name"
+        return "placeholder name — give it a real name"
+    # MALFORMED: a real-ish name that breaks the basic shape for its kind.
+    if name[:1].isupper():
+        return "off-convention — leading uppercase"
+    if low.startswith("filler") or low.startswith("pad") or name == "plane28":
+        return "padding/filler field — name it or mark reserved"
+    if "thing" in low:
+        return "vague placeholder ('thing') — name it specifically"
+    if re.search(r"[0-9A-Fa-f]{4,}", name) or "80" in name:
+        return "embedded address in name — give it a real name"
+    if "_" in name:
+        return "off-convention — underscore where one word is expected"
+    return "off-convention name"
+
+
 def convention_violation(sym: Symbol) -> Optional[str]:
     """Return why a (layer-1 GOOD) symbol breaks convention, or None if it conforms."""
     name = sym.name
@@ -389,9 +434,9 @@ def family_counts(
 #
 # A prefix family answers "what's it called?"; a *semantic* entity answers "is it
 # wired up?" -- by relating a symbol to its implementation. The check is not
-# tautological because it crosses kinds. Each entity is domain knowledge, so this
-# is a small curated registry. First entity: a Mario action (ACT_X constant) must
-# have an act_x handler function.
+# tautological because it crosses kinds (and often crosses files/representations:
+# a C enum to a data-table macro, a level constant to its script). Each entity is
+# domain knowledge, so this is a small curated registry.
 
 
 @dataclass(frozen=True)
@@ -403,7 +448,26 @@ class SemanticFinding:
     line: int
 
 
-def _entity_mario_actions(symbols: List[Symbol]):
+@dataclass
+class SemanticContext:
+    """What a semantic check sees: the parsed symbols, plus (optionally) the repo
+    root so a check can read other representations -- text tables, level scripts,
+    audio manifests -- that aren't part of the C symbol set."""
+
+    symbols: List[Symbol]
+    root: Optional[Path] = None
+
+    def read(self, rel: str) -> Optional[str]:
+        """Read a repo-relative file, or None if there's no root / it's missing."""
+        if self.root is None:
+            return None
+        try:
+            return (self.root / rel).read_text(errors="replace")
+        except OSError:
+            return None
+
+
+def _entity_mario_actions(ctx: SemanticContext):
     """A Mario action (ACT_X) should have an act_x handler function.
 
     Scoped to sm64.h: the ACT_* there are Mario's action state machine. (The
@@ -411,10 +475,10 @@ def _entity_mario_actions(symbols: List[Symbol]):
     the prefix -- and ACT_FLAG_/GROUP_/ID_ are flag/group sub-families, not
     actions.) This precision is the point: a prefix alone would conflate them.
     """
-    funcs = {s.name for s in symbols if s.kind == "function"}
+    funcs = {s.name for s in ctx.symbols if s.kind == "function"}
     actions = [
         s
-        for s in symbols
+        for s in ctx.symbols
         if s.kind == "constant"
         and s.file.endswith("sm64.h")
         and s.name.startswith("ACT_")
@@ -422,36 +486,181 @@ def _entity_mario_actions(symbols: List[Symbol]):
         and s.name != "ACT_UNINITIALIZED"
     ]
     findings: List[SemanticFinding] = []
-    linked = 0
     for s in actions:
         handler = "act_" + s.name[len("ACT_") :].lower()
-        if handler in funcs:
-            linked += 1
-        else:
+        if handler not in funcs:
             findings.append(
                 SemanticFinding(
                     "Mario action", s.name, f"no {handler}() handler", s.file, s.line
                 )
             )
-    summary = {
-        "entity": "Mario action",
-        "members": len(actions),
-        "linked": linked,
-        "gaps": len(findings),
-        "link": "ACT_X ⟷ act_x() handler",
+    return (
+        _summary("Mario action", "ACT_X ⟷ act_x() handler", actions, findings),
+        findings,
+    )
+
+
+def _entity_dialogs(ctx: SemanticContext):
+    """A numbered dialog ID (DIALOG_NNN) should have on-screen text.
+
+    The enum lives in include/dialog_ids.h; the text is a DEFINE_DIALOG(DIALOG_NNN,
+    ...) row in text/us/dialogs.h. A missing entry is a dialog that's declared but
+    never written -- the kind of gap this tool exists to surface."""
+    text = ctx.read("text/us/dialogs.h")
+    if text is None:
+        return None
+    defined = set(re.findall(r"DEFINE_DIALOG\(\s*(DIALOG_\w+)", text))
+    ids = [
+        s
+        for s in ctx.symbols
+        if s.kind == "enum"
+        and s.file.endswith("dialog_ids.h")
+        and re.fullmatch(r"DIALOG_\d+", s.name)
+    ]
+    findings = [
+        SemanticFinding("Dialog", s.name, "no DEFINE_DIALOG text entry", s.file, s.line)
+        for s in ids
+        if s.name not in defined
+    ]
+    return _summary("Dialog", "DIALOG_NNN ⟷ on-screen text", ids, findings), findings
+
+
+def _entity_cutscenes(ctx: SemanticContext):
+    """A cutscene (CUTSCENE_X) should be wired into the cutscene dispatcher.
+
+    The CUTSCENE_* defines are in src/game/camera.h; each playable one appears as
+    CUTSCENE(CUTSCENE_X, sCutsceneX) in the dispatch table in camera.c. (STOP/LOOP
+    are sentinels, not cutscenes.) The dispatch macro is ground truth -- some
+    cutscenes share a data table, so a name transform alone would misjudge them."""
+    src = ctx.read("src/game/camera.c")
+    if src is None:
+        return None
+    dispatched = set(re.findall(r"CUTSCENE\(\s*(CUTSCENE_\w+)", src))
+    cutscenes = [
+        s
+        for s in ctx.symbols
+        if s.kind == "constant"
+        and s.file.endswith("camera.h")
+        and s.name.startswith("CUTSCENE_")
+        and s.name not in ("CUTSCENE_STOP", "CUTSCENE_LOOP")
+    ]
+    findings = [
+        SemanticFinding(
+            "Cutscene", s.name, "not in the cutscene dispatcher", s.file, s.line
+        )
+        for s in cutscenes
+        if s.name not in dispatched
+    ]
+    return (
+        _summary("Cutscene", "CUTSCENE_X ⟷ dispatcher entry", cutscenes, findings),
+        findings,
+    )
+
+
+def _entity_sequences(ctx: SemanticContext):
+    """A music sequence (SEQ_X) should have an actual .m64 in the audio manifest.
+
+    The enum is include/seq_ids.h; the data is a key "<hex>_<name>" in
+    sound/sequences.json. The enum keeps an EVENT_ infix the manifest drops, so we
+    compare on the name suffix with that infix optionally stripped."""
+    manifest = ctx.read("sound/sequences.json")
+    if manifest is None:
+        return None
+    # Manifest keys look like "03_level_grass"; keep the part after the hex index.
+    keys = {
+        k.split("_", 1)[1]
+        for k in re.findall(r'"([0-9A-Fa-f]{2}_[a-z0-9_]+)"', manifest)
     }
-    return summary, findings
+    seqs = [
+        s
+        for s in ctx.symbols
+        if s.kind == "enum"
+        and s.file.endswith("seq_ids.h")
+        and s.name.startswith("SEQ_")
+        and s.name not in ("SEQ_COUNT",)
+    ]
+    findings = []
+    for s in seqs:
+        suffix = s.name[len("SEQ_") :].lower()
+        if suffix in keys or suffix.replace("event_", "", 1) in keys:
+            continue
+        findings.append(
+            SemanticFinding(
+                "Music sequence", s.name, "no .m64 in sequences.json", s.file, s.line
+            )
+        )
+    return _summary("Music sequence", "SEQ_X ⟷ .m64 sequence", seqs, findings), findings
 
 
-# Each entry: (symbols) -> (summary dict, [SemanticFinding]).
-SEMANTIC_ENTITIES = [_entity_mario_actions]
+# Matches a DEFINE_LEVEL("name", LEVEL_X, COURSE_X, folder, ...) row; captures the
+# level constant and the source-folder shorthand (4th arg) that names its script.
+_DEFINE_LEVEL = re.compile(
+    r"DEFINE_LEVEL\(\s*\"[^\"]*\"\s*,\s*(\w+)\s*,\s*\w+\s*,\s*(\w+)"
+)
 
 
-def semantic_report(symbols: List[Symbol]):
+def _entity_levels(ctx: SemanticContext):
+    """A level (LEVEL_X) should have a level-script entry point.
+
+    levels/level_defines.h has one DEFINE_LEVEL row per real level, naming a source
+    folder; the entry point is level_<folder>_entry[] in levels/<folder>/script.c.
+    (STUB_LEVEL rows have no folder and are intentionally excluded.) This is a
+    fully cross-file link: the constant, the folder, and the script all differ."""
+    defines = ctx.read("levels/level_defines.h")
+    if defines is None:
+        return None
+    rows = []  # (level_const, folder, line)
+    for i, line in enumerate(defines.splitlines(), start=1):
+        m = _DEFINE_LEVEL.search(line)
+        if m:
+            rows.append((m.group(1), m.group(2), i))
+    findings = []
+    for level, folder, line in rows:
+        script = ctx.read(f"levels/{folder}/script.c")
+        if not script or f"level_{folder}_entry" not in script:
+            findings.append(
+                SemanticFinding(
+                    "Level",
+                    level,
+                    f"no level_{folder}_entry[] script",
+                    "levels/level_defines.h",
+                    line,
+                )
+            )
+    return _summary("Level", "LEVEL_X ⟷ script entry point", rows, findings), findings
+
+
+def _summary(entity: str, link: str, members, findings) -> dict:
+    n = len(members)
+    return {
+        "entity": entity,
+        "members": n,
+        "linked": n - len(findings),
+        "gaps": len(findings),
+        "link": link,
+    }
+
+
+# Each entry: (SemanticContext) -> (summary dict, [SemanticFinding]) or None when
+# the check can't run (e.g. a file-based check with no repo root available).
+SEMANTIC_ENTITIES = [
+    _entity_mario_actions,
+    _entity_dialogs,
+    _entity_cutscenes,
+    _entity_levels,
+    _entity_sequences,
+]
+
+
+def semantic_report(symbols: List[Symbol], root: Optional[Path] = None):
+    ctx = SemanticContext(symbols, root)
     summaries = []
     findings: List[SemanticFinding] = []
     for check in SEMANTIC_ENTITIES:
-        summary, found = check(symbols)
+        result = check(ctx)
+        if result is None:
+            continue
+        summary, found = result
         summaries.append(summary)
         findings.extend(found)
     return summaries, findings
@@ -632,7 +841,7 @@ def _bar(ratio: float, width: int = 24) -> str:
 
 
 def print_report(
-    symbols: List[Symbol], top_files: int, samples: int
+    symbols: List[Symbol], top_files: int, samples: int, root: Optional[Path] = None
 ) -> Tuple[float, float]:
     counts = category_counts(symbols)
     score = overall_score(counts)
@@ -695,7 +904,9 @@ def print_report(
         print(f"\n  {kind} — {len(offenders)} ({und} undocumented, {mal} malformed):")
         for s in offenders[:samples]:
             tag = "U" if s.classification == Classification.UNDOCUMENTED else "M"
-            print(f"    [{tag}] {s.name}  @ {s.file}:{s.line}")
+            print(
+                f"    [{tag}] {s.name}  @ {s.file}:{s.line} — {completeness_reason(s)}"
+            )
         if len(offenders) > samples:
             print(f"    … and {len(offenders) - samples} more")
 
@@ -724,7 +935,7 @@ def print_report(
             print(f"  {fam:<16} n={c['count']:<4} complete {comp:4.0f}%")
 
     # Semantic entities: cross-reference checks (not tautological).
-    summaries, findings = semantic_report(symbols)
+    summaries, findings = semantic_report(symbols, root)
     if summaries:
         print("\nSemantic entities (implementation cross-references):")
         for sm in summaries:
@@ -740,11 +951,11 @@ def print_report(
     return score, uscore
 
 
-def to_json(symbols: List[Symbol]) -> dict:
+def to_json(symbols: List[Symbol], root: Optional[Path] = None) -> dict:
     counts = category_counts(symbols)
     ucounts = uniformity_counts(symbols)
     named = _named_families(symbols, MIN_FAMILY_MEMBERS)
-    semantic_summaries, semantic_findings = semantic_report(symbols)
+    semantic_summaries, semantic_findings = semantic_report(symbols, root)
     return {
         "score": overall_score(counts),
         "categories": {
@@ -757,6 +968,7 @@ def to_json(symbols: List[Symbol]) -> dict:
                 "kind": s.kind,
                 "family": family_label(s, named),
                 "classification": s.classification.name,
+                "reason": completeness_reason(s),
                 "file": s.file,
                 "line": s.line,
             }
@@ -814,8 +1026,8 @@ def main() -> int:
         return 2
 
     symbols = collect_symbols(args.root)
-    score, uscore = print_report(symbols, args.top_files, args.samples)
-    data = to_json(symbols)
+    score, uscore = print_report(symbols, args.top_files, args.samples, args.root)
+    data = to_json(symbols, args.root)
     if args.json:
         args.json.parent.mkdir(parents=True, exist_ok=True)
         args.json.write_text(json.dumps(data, indent=2))

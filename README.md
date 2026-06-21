@@ -90,8 +90,10 @@ prefix group, so "do its members share the prefix?" is true by construction.)
 
 A prefix family answers "what's it called?"; a **semantic entity** answers "is it
 wired up?" — by cross-referencing a symbol to its *implementation*. This isn't
-tautological, because the check crosses kinds. Each entity is domain knowledge,
-so it's a small curated registry. The first:
+tautological, because the check crosses kinds (and usually files and
+representations: a C enum vs. a data-table macro, a level constant vs. its
+script). Each entity is domain knowledge, so it's a small curated registry
+(`SEMANTIC_ENTITIES` in `doc_measure.py`):
 
 - **Mario action** — an `ACT_X` constant (in `sm64.h`) should have an `act_x()`
   handler function. 221/232 link; the 11 gaps are real — actions that share a
@@ -99,12 +101,35 @@ so it's a small curated registry. The first:
   (`ACT_UNKNOWN_0002020E`). Precision matters: the `ACT_1`…`ACT_6` in
   `model_ids.h` are *course acts*, a different meaning sharing the prefix, and
   are excluded.
+- **Dialog** — a numbered `DIALOG_NNN` (in `dialog_ids.h`) should have on-screen
+  text, a `DEFINE_DIALOG(DIALOG_NNN, …)` row in `text/us/dialogs.h`. 170/170.
+- **Cutscene** — a `CUTSCENE_X` (in `camera.h`) should be wired into the cutscene
+  dispatcher, a `CUTSCENE(CUTSCENE_X, …)` entry in `camera.c`. 45/46 — the lone
+  gap, `CUTSCENE_WATER_DEATH`, is documented as not-in-switch.
+- **Level** — a `LEVEL_X` (a `DEFINE_LEVEL` row in `levels/level_defines.h`)
+  should have a `level_<folder>_entry[]` script in `levels/<folder>/script.c`.
+  31/31. (Fully cross-file: the constant, the folder, and the script all differ.)
+- **Music sequence** — a `SEQ_X` (in `seq_ids.h`) should have an actual `.m64` in
+  the audio manifest `sound/sequences.json`. 35/35.
+
+These roll up into a third headline number, **wired up** (linked / total across
+all entities). A file-reading entity only runs when pointed at a real checkout;
+without one, the symbol-only checks (Mario action) still run.
 
 Gaps show up in the worklist tagged `S`; the JSON has `semantic_entities` (the
 summary) and `semantic_findings` (the gaps).
 
 Convention violations appear in the same worklist (tagged `C`, with the reason),
-and in the JSON under `violations` / `conventions` / `uniformity_score`.
+and in the JSON under `violations` / `conventions` / `uniformity_score`. Every
+completeness row carries a specific, actionable **reason** — `auto func_<addr>`,
+`raw stack slot (sp<offset>)`, `padding/filler`, … — not just "undocumented".
+
+### The report page
+
+The HTML is self-contained (data embedded, no external assets) and has a
+**dark/light toggle** (it follows your OS by default and remembers your choice),
+three headline scores, per-kind bars colored by health, the family and semantic
+tables, and one sortable/filterable worklist with a tag legend (`U`/`M`/`C`/`S`).
 
 ### Hosted report (GitHub Pages)
 
