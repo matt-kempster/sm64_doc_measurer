@@ -1,9 +1,10 @@
 """Render a self-contained current-state HTML report.
 
 One static file: the result JSON is embedded, and a little vanilla JS renders the
-two axes -- completeness and uniformity -- as per-category bars plus a single
-sortable/filterable worklist (undocumented + malformed + convention violations).
-No external assets, so it drops straight onto GitHub Pages.
+two axes -- completeness and uniformity -- as per-category bars, an entity-family
+table (constants/enums grouped by prefix, so ACT_*/SOUND_*/... are named things),
+and a single sortable/filterable worklist. No external assets, so it drops
+straight onto GitHub Pages.
 """
 
 import json
@@ -56,9 +57,12 @@ _TEMPLATE = """<!doctype html>
   th {{ cursor: pointer; user-select: none; color: var(--muted); font-weight: 600;
         position: sticky; top: 0; background: var(--bg); }}
   th:hover {{ color: var(--fg); }}
-  td.name {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }}
+  td.name, td.fam {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }}
   td.file {{ color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; }}
   td.reason {{ color: var(--muted); font-size: 12px; }}
+  .minibar {{ display: inline-block; vertical-align: middle; width: 90px; height: 8px;
+              background: var(--line); border-radius: 4px; overflow: hidden; margin-right: 8px; }}
+  .minibar > span {{ display: block; height: 100%; background: var(--good); }}
   .tag {{ display: inline-block; width: 1.6em; text-align: center; border-radius: 4px;
           font-weight: 700; font-size: 11px; padding: 1px 0; }}
   .tag.U {{ background: rgba(248,81,73,.18); color: var(--und); }}
@@ -84,6 +88,18 @@ _TEMPLATE = """<!doctype html>
   <h2>Uniformity — do those names follow convention?</h2>
   <div class="cats" id="cats-uniform"></div>
 
+  <h2>Entities — constant &amp; enum families (grouped by prefix)</h2>
+  <div class="controls"><span class="count" id="fam-count"></span></div>
+  <table>
+    <thead><tr>
+      <th data-fk="family">family</th>
+      <th data-fk="count">count</th>
+      <th data-fk="complete">completeness</th>
+      <th data-fk="uniform">uniformity</th>
+    </tr></thead>
+    <tbody id="fam-rows"></tbody>
+  </table>
+
   <h2>Worklist</h2>
   <div class="controls">
     <input type="search" id="q" placeholder="filter by name or file…">
@@ -93,12 +109,14 @@ _TEMPLATE = """<!doctype html>
       <option value="convention">convention</option>
     </select>
     <select id="kind"></select>
+    <select id="famsel"></select>
     <span class="count" id="count"></span>
   </div>
   <table>
     <thead><tr>
       <th data-k="tag">!</th>
       <th data-k="kind">kind</th>
+      <th data-k="family">family</th>
       <th data-k="name">name</th>
       <th data-k="file">file</th>
       <th data-k="line">line</th>
@@ -115,6 +133,13 @@ document.getElementById('score').textContent = (DATA.score * 100).toFixed(1) + '
 document.getElementById('uscore').textContent =
   ((DATA.uniformity_score ?? 1) * 100).toFixed(1) + '%';
 
+function esc(s) {{ return String(s).replace(/[&<>]/g, c => ({{'&':'&amp;','<':'&lt;','>':'&gt;'}}[c])); }}
+function pctCell(ratio) {{
+  const p = (ratio * 100).toFixed(0);
+  return `<span class="minibar"><span style="width:${{(ratio*100).toFixed(1)}}%"></span></span>${{p}}%`;
+}}
+
+// --- axis bars ---
 function bars(elId, entries) {{
   const el = document.getElementById(elId);
   for (const [name, good, total] of entries) {{
@@ -136,35 +161,64 @@ bars('cats-uniform', Object.keys(DATA.conventions || {{}}).map(k => {{
   return [k, c.CONFORMING, c.CONFORMING + c.VIOLATION];
 }}));
 
-// One worklist combining both axes.
+// --- entity families table (sortable) ---
+const FAMILIES = Object.entries(DATA.families || {{}}).map(([family, c]) => ({{
+  family, count: c.count,
+  complete: c.count ? c.good / c.count : 1,
+  uniform: c.good ? c.conforming / c.good : 1,
+}}));
+let famKey = 'complete', famDir = 1;
+const famBody = document.getElementById('fam-rows');
+document.getElementById('fam-count').textContent = FAMILIES.length + ' families';
+function renderFamilies() {{
+  FAMILIES.sort((a, b) => {{
+    let x = a[famKey], y = b[famKey];
+    return (x < y ? -1 : x > y ? 1 : 0) * famDir;
+  }});
+  famBody.innerHTML = FAMILIES.map(f =>
+    `<tr><td class="fam">${{esc(f.family)}}</td><td>${{f.count}}</td>`
+    + `<td>${{pctCell(f.complete)}}</td><td>${{pctCell(f.uniform)}}</td></tr>`
+  ).join('');
+}}
+document.querySelectorAll('th[data-fk]').forEach(th => th.addEventListener('click', () => {{
+  const k = th.dataset.fk;
+  if (k === famKey) famDir = -famDir; else {{ famKey = k; famDir = (k === 'family') ? 1 : 1; }}
+  renderFamilies();
+}}));
+renderFamilies();
+
+// --- worklist (both axes combined) ---
 const tagReason = {{UNDOCUMENTED: 'undocumented', MALFORMED: 'malformed'}};
 const rows = [
   ...DATA.needs_attention.map(r => ({{
     tag: r.classification === 'UNDOCUMENTED' ? 'U' : 'M', axis: 'completeness',
-    kind: r.kind, name: r.name, file: r.file, line: r.line,
+    kind: r.kind, family: r.family || '', name: r.name, file: r.file, line: r.line,
     reason: tagReason[r.classification] || '',
   }})),
   ...(DATA.violations || []).map(r => ({{
     tag: 'C', axis: 'convention',
-    kind: r.kind, name: r.name, file: r.file, line: r.line, reason: r.reason,
+    kind: r.kind, family: r.family || '', name: r.name, file: r.file, line: r.line,
+    reason: r.reason,
   }})),
 ];
 
 let sortKey = 'file', sortDir = 1;
 const q = document.getElementById('q'), kindSel = document.getElementById('kind');
-const axisSel = document.getElementById('axis');
+const axisSel = document.getElementById('axis'), famSel = document.getElementById('famsel');
 const tbody = document.getElementById('rows'), countEl = document.getElementById('count');
 
 const allKinds = [...new Set(rows.map(r => r.kind))].sort();
 kindSel.innerHTML = '<option value="">all kinds</option>'
   + allKinds.map(k => `<option value="${{k}}">${{k}}</option>`).join('');
-
-function esc(s) {{ return String(s).replace(/[&<>]/g, c => ({{'&':'&amp;','<':'&lt;','>':'&gt;'}}[c])); }}
+// family options, by descending member count (most prominent first)
+const famOpts = FAMILIES.slice().sort((a, b) => b.count - a.count).map(f => f.family);
+famSel.innerHTML = '<option value="">all families</option>'
+  + famOpts.map(f => `<option value="${{esc(f)}}">${{esc(f)}}</option>`).join('');
 
 function render() {{
-  const term = q.value.toLowerCase(), fk = kindSel.value, fa = axisSel.value;
+  const term = q.value.toLowerCase(), fk = kindSel.value, fa = axisSel.value, ff = famSel.value;
   let view = rows.filter(r =>
-    (!fk || r.kind === fk) && (!fa || r.axis === fa) &&
+    (!fk || r.kind === fk) && (!fa || r.axis === fa) && (!ff || r.family === ff) &&
     (!term || r.name.toLowerCase().includes(term) || r.file.toLowerCase().includes(term)));
   view.sort((a, b) => {{
     let x = a[sortKey], y = b[sortKey];
@@ -176,20 +230,21 @@ function render() {{
   tbody.innerHTML = view.slice(0, MAX).map(r =>
     `<tr><td><span class="tag ${{r.tag}}">${{r.tag}}</span></td>`
     + `<td class="kind">${{r.kind}}</td>`
+    + `<td class="fam">${{esc(r.family)}}</td>`
     + `<td class="name">${{esc(r.name)}}</td>`
     + `<td class="file">${{esc(r.file)}}</td>`
     + `<td>${{r.line}}</td>`
     + `<td class="reason">${{esc(r.reason)}}</td></tr>`
   ).join('') + (view.length > MAX
-    ? `<tr><td colspan="6" class="count">… ${{view.length - MAX}} more (narrow the filter)</td></tr>` : '');
+    ? `<tr><td colspan="7" class="count">… ${{view.length - MAX}} more (narrow the filter)</td></tr>` : '');
 }}
 
-document.querySelectorAll('th').forEach(th => th.addEventListener('click', () => {{
+document.querySelectorAll('th[data-k]').forEach(th => th.addEventListener('click', () => {{
   const k = th.dataset.k;
   if (k === sortKey) sortDir = -sortDir; else {{ sortKey = k; sortDir = 1; }}
   render();
 }}));
-[q, kindSel, axisSel].forEach(el => el.addEventListener('input', render));
+[q, kindSel, axisSel, famSel].forEach(el => el.addEventListener('input', render));
 render();
 </script>
 </body>

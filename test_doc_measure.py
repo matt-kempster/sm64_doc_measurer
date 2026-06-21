@@ -225,6 +225,43 @@ def test_constant_upper_snake_convention():
     assert m.convention_violation(mksym("AddToGroup", "constant"))  # goddard PascalCase
 
 
+FAMILY_SOURCE = b"""
+#define ACT_WALKING 0x04
+#define ACT_JUMPING 0x05
+#define ACT_RUNNING 0x06
+#define SOLO_ONE_OFF 0x01
+enum E { ACT_FLAG_AIR, ACT_FLAG_MOVING, ACT_FLAG_STATIONARY };
+const BehaviorScript bhvGoomba[] = {};
+"""
+
+
+def test_family_of():
+    g = {s.name: s for s in m.extract_source(FAMILY_SOURCE, "f.c")}
+    assert m.family_of(g["ACT_WALKING"]) == "ACT_*"
+    assert m.family_of(g["bhvGoomba"]) == "bhv*"
+    # a function has no family
+    fn = m.extract_source(b"void set_x(void) {}", "x.c")[0]
+    assert m.family_of(fn) is None
+
+
+def test_family_counts_collapses_small_groups():
+    s = m.extract_source(FAMILY_SOURCE, "f.c")
+    # ACT_ has 6 members (3 #define + 3 enum) -> named at threshold 4; SOLO -> other
+    fams = m.family_counts(s, min_members=4)
+    assert "ACT_*" in fams
+    assert fams["ACT_*"]["count"] == 6
+    assert "SOLO_*" not in fams
+    assert m.OTHER_FAMILY in fams  # SOLO_ONE_OFF collapsed here
+
+
+def test_to_json_has_families_and_row_family():
+    d = m.to_json(m.extract_source(FAMILY_SOURCE, "f.c"))
+    assert "families" in d
+    # every needs_attention / violation row carries a family key (may be null)
+    for row in d["needs_attention"] + d["violations"]:
+        assert "family" in row
+
+
 def test_preproc_blanking_keeps_guarded_code():
     src = b"""
 #ifdef VERSION_JP

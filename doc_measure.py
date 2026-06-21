@@ -320,6 +320,65 @@ def convention_violation(sym: Symbol) -> Optional[str]:
     return None
 
 
+# --------------------------------------------------------------------------- #
+# Entity families (semantic grouping by prefix)
+# --------------------------------------------------------------------------- #
+#
+# Beyond the C-syntactic kind, constants and enum members cluster into semantic
+# families by shared prefix -- ACT_* (Mario actions), SOUND_*, MODEL_*, ... --
+# and behaviors form their own family. Surfacing these makes "ACT_" a navigable
+# entity rather than an anonymous member of "constant".
+
+MIN_FAMILY_MEMBERS = 10  # smaller prefix groups collapse into "(other)"
+OTHER_FAMILY = "(other)"
+
+
+def family_of(sym: Symbol) -> Optional[str]:
+    """The semantic family a symbol belongs to, or None if it isn't family-grouped."""
+    if sym.kind == "global" and sym.type_name and "BehaviorScript" in sym.type_name:
+        return "bhv*"
+    if sym.kind in ("constant", "enum"):
+        prefix = sym.name.split("_", 1)[0]
+        return prefix + "_*" if prefix else None
+    return None
+
+
+def _named_families(symbols: List[Symbol], min_members: int) -> set:
+    """Family labels with enough members to be worth naming (rest -> OTHER_FAMILY)."""
+    sizes: Dict[str, int] = defaultdict(int)
+    for s in symbols:
+        fam = family_of(s)
+        if fam:
+            sizes[fam] += 1
+    return {f for f, n in sizes.items() if n >= min_members}
+
+
+def family_label(sym: Symbol, named: set) -> Optional[str]:
+    fam = family_of(sym)
+    if fam is None:
+        return None
+    return fam if fam in named else OTHER_FAMILY
+
+
+def family_counts(
+    symbols: List[Symbol], min_members: int = MIN_FAMILY_MEMBERS
+) -> Dict[str, Dict[str, int]]:
+    """Per-family tallies: count, complete (GOOD), and conforming (uniform)."""
+    named = _named_families(symbols, min_members)
+    out: Dict[str, Dict[str, int]] = {}
+    for s in symbols:
+        label = family_label(s, named)
+        if label is None:
+            continue
+        d = out.setdefault(label, {"count": 0, "good": 0, "conforming": 0})
+        d["count"] += 1
+        if s.classification == Classification.GOOD:
+            d["good"] += 1
+            if not convention_violation(s):
+                d["conforming"] += 1
+    return out
+
+
 def extract_file(path: Path, rel: str) -> List[Symbol]:
     """Parse one C/H file and return every classified named symbol in it."""
     return extract_source(path.read_bytes(), rel)
@@ -576,12 +635,25 @@ def print_report(
             print(f"    [C] {s.name}  @ {s.file}:{s.line} — {reason}")
         if len(violations) > samples:
             print(f"    … and {len(violations) - samples} more")
+
+    # Entity families (constants/enums grouped by prefix) by completeness.
+    fams = family_counts(symbols)
+    if fams:
+        print(f"\nEntity families ({len(fams)}), lowest completeness first:")
+        ranked = sorted(fams.items(), key=lambda kv: kv[1]["good"] / kv[1]["count"])
+        for fam, c in ranked[:top_files]:
+            comp = 100 * c["good"] / c["count"]
+            unif = 100 * c["conforming"] / c["good"] if c["good"] else 100.0
+            print(
+                f"  {fam:<16} n={c['count']:<4} complete {comp:4.0f}%  uniform {unif:4.0f}%"
+            )
     return score, uscore
 
 
 def to_json(symbols: List[Symbol]) -> dict:
     counts = category_counts(symbols)
     ucounts = uniformity_counts(symbols)
+    named = _named_families(symbols, MIN_FAMILY_MEMBERS)
     return {
         "score": overall_score(counts),
         "categories": {
@@ -592,6 +664,7 @@ def to_json(symbols: List[Symbol]) -> dict:
             {
                 "name": s.name,
                 "kind": s.kind,
+                "family": family_label(s, named),
                 "classification": s.classification.name,
                 "file": s.file,
                 "line": s.line,
@@ -605,6 +678,7 @@ def to_json(symbols: List[Symbol]) -> dict:
             {
                 "name": s.name,
                 "kind": s.kind,
+                "family": family_label(s, named),
                 "reason": convention_violation(s),
                 "file": s.file,
                 "line": s.line,
@@ -614,6 +688,7 @@ def to_json(symbols: List[Symbol]) -> dict:
             and s.kind in CONVENTION_KINDS
             and convention_violation(s)
         ],
+        "families": family_counts(symbols),
     }
 
 

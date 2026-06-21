@@ -75,6 +75,17 @@ OVERALL                 ██████████████████�
 (The lower enum uniformity is the decomp's intentionally lowercase preset enums —
 `special_*`, `macro_*` — which the `UPPER_SNAKE` rule flags by design.)
 
+### Entity families
+
+Beyond the C-syntactic kind, constants and enum members are grouped into
+**families by prefix** — `ACT_*` (Mario actions), `SOUND_*`, `MODEL_*`,
+`DIALOG_*`, `bhv*` (behaviors), … — so a domain entity like "Mario actions" is a
+named, navigable thing rather than an anonymous slice of "constant". Families are
+auto-discovered (any prefix with ≥10 members; the long tail collapses to
+`(other)`), each scored on both axes, and the worklist can be filtered to one
+family. In the JSON they're under `families`, and each worklist row carries its
+`family`.
+
 Convention violations appear in the same worklist (tagged `C`, with the reason),
 and in the JSON under `violations` / `conventions` / `uniformity_score`.
 
