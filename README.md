@@ -39,13 +39,14 @@ category     documented   completeness
 function     4333/4553  ███████████████████████░  95.2%
 arg          4509/5461  ████████████████████░░░░  82.6%
 local        5884/6786  █████████████████████░░░  86.7%
-struct        238/254   ██████████████████████░░  93.7%
-member       1688/1950  █████████████████████░░░  86.6%
-global       3152/3836  ████████████████████░░░░  82.2%
-constant     4181/4521  ██████████████████████░░  92.5%
-enum         1471/1529  ███████████████████████░  96.2%
+struct        240/256   ██████████████████████░░  93.8%
+member       1693/1955  █████████████████████░░░  86.6%
+global       3173/3836  ████████████████████░░░░  82.7%
+constant     3704/3807  ███████████████████████░  97.3%
+enum         1479/1529  ███████████████████████░  96.7%
+object_field    524/712   ██████████████████░░░░░░  73.6%
 ------------------------------------------------------
-OVERALL                 ██████████████████████░░  89.4%
+OVERALL                 █████████████████████░░░  88.3%
 ```
 
 `--json` writes the full result, including every symbol needing attention, for
@@ -62,25 +63,31 @@ Documentation has two goals, scored separately:
   conventions? This is a second, *role-aware* layer over the layer-1 GOOD names:
   functions should be `snake_case`, types `PascalCase`, struct members
   `camelCase`, globals carry a `g`/`s` prefix, and a `BehaviorScript` global must
-  be `bhv…` (a type-aware family rule), and `#define` constants / enum members
-  should be `UPPER_SNAKE`. Snake_case data tables and `_`-prefixed linker symbols
-  are accepted alternatives, not flagged.
+  be `bhv…` (a type-aware family rule), `#define` constants / enum members should
+  be `UPPER_SNAKE`, object fields `o…` PascalCase, and an include guard (the
+  `guard` kind) must end in `_H`. Snake_case data tables and `_`-prefixed linker
+  symbols are accepted alternatives, not flagged. Two specific misspellings are
+  called out by name: `beh_` is flagged as a typo for the behavior prefix `bhv_`.
 
 ```
 convention   conforming   uniformity
 ------------------------------------------------------
-function     4332/4333  ████████████████████████ 100.0%
-struct        236/238   ████████████████████████  99.2%
-member       1686/1688  ████████████████████████  99.9%
-global       2799/3152  █████████████████████░░░  88.8%
-constant     3639/4181  █████████████████████░░░  87.0%
-enum         1035/1471  █████████████████░░░░░░░  70.4%
+function     4330/4333  ████████████████████████  99.9%
+struct        237/240   ████████████████████████  98.8%
+member       1691/1693  ████████████████████████  99.9%
+global       2802/3173  █████████████████████░░░  88.3%
+constant     3681/3704  ████████████████████████  99.4%
+enum         1043/1479  █████████████████░░░░░░░  70.5%
+object_field    524/524   ████████████████████████ 100.0%
+guard         180/182   ████████████████████████  98.9%
 ------------------------------------------------------
-OVERALL                 ██████████████████████░░  91.1%
+OVERALL                 ███████████████████████░  94.5%
 ```
 
 (The lower enum uniformity is the decomp's intentionally lowercase preset enums —
-`special_*`, `macro_*` — which the `UPPER_SNAKE` rule flags by design.)
+`special_*`, `macro_*` — which the `UPPER_SNAKE` rule flags by design. The `guard`
+row catches real typos: `MARIO_ACTIONS_MOVING`/`_STATIONARY` opened
+`#ifndef MARIO_ACTIONS_MOVING` instead of `…_MOVING_H`, breaking the house style.)
 
 ### Entity families
 
@@ -151,11 +158,16 @@ is ~92%, `audio` ~20% — and an aggregate would hide that. It's informational (
 every function needs prose), so it isn't folded into the completeness score; the
 JSON carries it under `doc_comments`.
 
-(An aside on what *didn't* make the cut: a "storage class must match prefix" rule
-— `static`→`s`, `extern`→`g` — was prototyped and dropped. In SM64 the `s`/`g`
-prefix documents *intent*, not the literal `static` keyword: `sAreaYaw` is
-`s`-prefixed but has global linkage. The rule would have produced 500+ false
-positives, so it isn't shipped.)
+(An aside on what *didn't* make the cut. A "storage class must match prefix" rule
+— `static`→`s`, `extern`→`g` — was prototyped and dropped: in SM64 the `s`/`g`
+prefix documents *intent*, not the literal `static` keyword (`sAreaYaw` is
+`s`-prefixed but has global linkage), so it would have produced 500+ false
+positives. A "`const Gfx` display lists must contain a `dl` token" rule was also
+dropped despite a strong base (97.6% of 3,759 display lists do): all 90 exceptions
+live in a single file, `actors/mario/model.inc.c`, with clean semantic names like
+`mario_torso` / `mario_left_arm`. That's one author's consistent style choice, not
+90 defects — flagging it would be noise, the very thing the worklist exists to
+avoid.)
 
 ### Hosted report (GitHub Pages)
 

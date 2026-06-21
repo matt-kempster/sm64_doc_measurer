@@ -333,6 +333,9 @@ def _classify(name: str, kind: str) -> Classification:
 # legible separately.
 
 # Kinds that carry a convention rule (args/locals have no settled casing rule).
+# "guard" is not a C symbol but an include-guard macro (see collect_guards): it
+# has a naming convention (end in _H) and real violations, so it rides the same
+# uniformity axis.
 CONVENTION_KINDS = (
     "function",
     "struct",
@@ -341,6 +344,7 @@ CONVENTION_KINDS = (
     "constant",
     "enum",
     "object_field",
+    "guard",
 )
 
 _SNAKE = re.compile(r"[a-z][a-z0-9_]*$")  # set_mario_action, dialog_table_eu_en
@@ -399,6 +403,11 @@ def convention_violation(sym: Symbol) -> Optional[str]:
     """Return why a (layer-1 GOOD) symbol breaks convention, or None if it conforms."""
     name = sym.name
     if sym.kind == "function":
+        # `bhv_` is the canonical prefix for behavior native entry points; `beh_`
+        # is a known misspelling of it that shipped in the decomp (the two
+        # file_select.c menu-background functions registered in behavior_data.c).
+        if name.startswith("beh_"):
+            return "behavior prefix typo: beh_ should be bhv_"
         if not _SNAKE.match(name):
             return "function should be snake_case"
     elif sym.kind == "struct":
@@ -425,6 +434,14 @@ def convention_violation(sym: Symbol) -> Optional[str]:
         # constants, or all ~700 would read as violations).
         if not _OBJ_FIELD.match(name):
             return "object field should be o + PascalCase"
+    elif sym.kind == "guard":
+        # Include guards are '#ifndef X_H / #define X_H'. A missing guard, or one
+        # whose name doesn't end in _H, is a mechanical defect a doc tool should
+        # surface (a duplicated/mistyped guard can silently break inclusion).
+        if name == _NO_GUARD:
+            return "header is missing an #ifndef include guard"
+        if not name.endswith("_H"):
+            return "include guard should end in _H (house style)"
     return None
 
 
@@ -752,16 +769,18 @@ def extract_source(src: bytes, rel: str) -> List[Symbol]:
             add(name, "global", decl, type_name)
 
     # Object-like #define constants. Skip include guards (they aren't real
-    # constants): names ending in _H / _H_, or wrapped in underscores (_SM64_H_).
-    # Object fields (`#define oFoo OBJECT_FIELD_*(...)`) get their own kind: they
-    # are intentionally o+PascalCase, not UPPER_SNAKE, so scoring them as constants
-    # would (wrongly) read all ~700 as convention violations.
+    # constants): names ending in _H / _H_, or wrapped in underscores (_SM64_H_),
+    # plus this file's actual guard macro by structure (so a *malformed* guard
+    # like MARIO_ACTIONS_MOVING isn't miscounted as a conforming constant -- it's
+    # measured as a guard instead). Object fields (`#define oFoo OBJECT_FIELD_*`)
+    # get their own kind: they are intentionally o+PascalCase, not UPPER_SNAKE.
+    guard_name = _first_guard(src)[0]
     for d in _iter(root, "preproc_def"):
         nm = d.child_by_field_name("name")
         if nm is None:
             continue
         name = nm.text.decode()
-        if _is_include_guard(name):
+        if _is_include_guard(name) or name == guard_name:
             continue
         kind = "object_field" if re.match(r"o[A-Z]", name) else "constant"
         add(name, kind, d)
@@ -788,6 +807,59 @@ def should_ignore_file(rel: str) -> bool:
     return "/PR/" in rel or rel.startswith("PR/")
 
 
+# --------------------------------------------------------------------------- #
+# Include-guard hygiene
+# --------------------------------------------------------------------------- #
+#
+# Every decomp header opens with '#ifndef X_H / #define X_H' and closes with
+# '#endif'. A guard that's missing, or whose name doesn't end in _H, is a real,
+# mechanical defect -- a duplicated or mistyped guard can silently break
+# inclusion. We model each guard as a pseudo-symbol of kind "guard" so it rides
+# the existing uniformity axis (it's a named identifier with a naming rule), with
+# convention_violation(guard) doing the check.
+
+_NO_GUARD = "(no include guard)"  # sentinel name when a header has no #ifndef
+
+# Headers exempt from the guard convention: the vendored SDK uses its own _X_
+# style, and two X-macro data files are deliberately guardless (included
+# repeatedly to expand DEFINE_COURSE / DEFINE_LEVEL rows).
+_GUARD_EXEMPT = {
+    "include/ultra64.h",
+    "levels/course_defines.h",
+    "levels/level_defines.h",
+}
+
+_IFNDEF = re.compile(rb"^[ \t]*#[ \t]*ifndef[ \t]+(\w+)", re.MULTILINE)
+
+
+def _first_guard(src: bytes) -> Tuple[Optional[str], int]:
+    """(macro, 1-based line) of the first ``#ifndef`` in a header, else (None, 1)."""
+    m = _IFNDEF.search(src)
+    if not m:
+        return None, 1
+    return m.group(1).decode(), src.count(b"\n", 0, m.start()) + 1
+
+
+def collect_guards(root: Path) -> List[Symbol]:
+    """Include-guard macros across all decomp headers, as kind-"guard" symbols."""
+    headers = sorted(
+        {
+            *(root / "include").glob("*.h"),
+            *(root / "src").glob("**/*.h"),
+            *(root / "levels").glob("**/*.h"),
+            *(root / "actors").glob("**/*.h"),
+        }
+    )
+    out: List[Symbol] = []
+    for path in headers:
+        rel = str(path.relative_to(root))
+        if should_ignore_file(rel) or rel in _GUARD_EXEMPT:
+            continue
+        name, line = _first_guard(path.read_bytes())
+        out.append(Symbol(name or _NO_GUARD, "guard", Classification.GOOD, rel, line))
+    return out
+
+
 def collect_symbols(root: Path) -> List[Symbol]:
     files = sorted(
         {
@@ -802,6 +874,7 @@ def collect_symbols(root: Path) -> List[Symbol]:
         if should_ignore_file(rel):
             continue
         symbols.extend(extract_file(path, rel))
+    symbols.extend(collect_guards(root))
     return symbols
 
 
@@ -854,7 +927,8 @@ def category_counts(symbols: List[Symbol]) -> Dict[str, Dict[Classification, int
         kind: defaultdict(int) for kind in CLASSIFIERS
     }
     for s in symbols:
-        counts[s.kind][s.classification] += 1
+        if s.kind in counts:  # "guard" rides the uniformity axis only, not this one
+            counts[s.kind][s.classification] += 1
     return counts
 
 

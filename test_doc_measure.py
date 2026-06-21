@@ -172,6 +172,75 @@ def test_convention_behavior_type_rule():
     assert m.convention_violation(g["behBad"]) == "behavior should be bhv + PascalCase"
 
 
+def test_convention_beh_prefix_is_typo_for_bhv():
+    # `beh_` shipped in the decomp (file_select.c menu backgrounds) as a
+    # misspelling of the behavior native-entry prefix `bhv_`.
+    assert (
+        m.convention_violation(mksym("beh_yellow_background_menu_loop", "function"))
+        == "behavior prefix typo: beh_ should be bhv_"
+    )
+    # FP-safety: only the `beh_` prefix is a typo, not any word starting "beh".
+    assert m.convention_violation(mksym("set_mario_action", "function")) is None
+    assert m.convention_violation(mksym("behind_camera_check", "function")) is None
+
+
+def test_include_guard_convention():
+    assert m.convention_violation(mksym("AREA_H", "guard")) is None
+    assert m.convention_violation(mksym("WF_HEADER_H", "guard")) is None
+    assert (
+        m.convention_violation(mksym("MARIO_ACTIONS_MOVING", "guard"))
+        == "include guard should end in _H (house style)"
+    )
+    assert (
+        m.convention_violation(mksym(m._NO_GUARD, "guard"))
+        == "header is missing an #ifndef include guard"
+    )
+
+
+def test_collect_guards(tmp_path):
+    (tmp_path / "include").mkdir()
+    (tmp_path / "src" / "game").mkdir(parents=True)
+    (tmp_path / "levels").mkdir()
+    (tmp_path / "include" / "area.h").write_text(
+        "#ifndef AREA_H\n#define AREA_H\n#endif\n"
+    )
+    # a real decomp typo: guard missing the _H suffix
+    (tmp_path / "src" / "game" / "moving.h").write_text(
+        "#ifndef MARIO_ACTIONS_MOVING\n#define MARIO_ACTIONS_MOVING\n#endif\n"
+    )
+    # exempt X-macro data file: guardless on purpose, must be skipped (not flagged)
+    (tmp_path / "levels" / "level_defines.h").write_text("DEFINE_LEVEL(...)\n")
+    by_file = {g.file: g for g in m.collect_guards(tmp_path)}
+    assert "levels/level_defines.h" not in by_file
+    assert m.convention_violation(by_file["include/area.h"]) is None
+    bad = by_file["src/game/moving.h"]
+    assert bad.kind == "guard" and bad.name == "MARIO_ACTIONS_MOVING" and bad.line == 1
+    assert m.convention_violation(bad)
+
+
+def test_malformed_guard_not_double_counted_as_constant():
+    # A guard missing _H must be measured as a guard, not slip through the
+    # define loop as a conforming UPPER_SNAKE constant.
+    src = (
+        b"#ifndef MARIO_ACTIONS_MOVING\n#define MARIO_ACTIONS_MOVING\n"
+        b"#define REAL_CONST 1\n#endif\n"
+    )
+    names = {(x.kind, x.name) for x in m.extract_source(src, "src/game/moving.h")}
+    assert ("constant", "MARIO_ACTIONS_MOVING") not in names
+    assert ("constant", "REAL_CONST") in names
+
+
+def test_guard_rides_uniformity_but_not_completeness():
+    # guard is a CONVENTION_KIND (scored on uniformity) but not a CLASSIFIER kind
+    # (excluded from completeness counts, which iterate CLASSIFIERS).
+    assert "guard" in m.CONVENTION_KINDS and "guard" not in m.CLASSIFIERS
+    bad = mksym("BADGUARD", "guard")  # classification GOOD, but off-convention
+    counts = m.category_counts([bad])  # must not KeyError on the unknown kind
+    assert all(sum(v.values()) == 0 for v in counts.values())
+    ucounts = m.uniformity_counts([bad])
+    assert ucounts["guard"]["VIOLATION"] == 1
+
+
 def test_uniformity_axis_excludes_args_and_locals():
     counts = m.uniformity_counts(syms())
     assert set(counts) == set(m.CONVENTION_KINDS)
