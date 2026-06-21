@@ -4,12 +4,19 @@ A tool to measure the documentation completeness of the decompiled
 [SM64 source](https://github.com/n64decomp/sm64).
 
 Every named symbol the decomp exposes — functions, their arguments and local
-variables, structs and their members, global variables, `#define` constants, and
-enum members — is classified as **GOOD**, **MALFORMED** (named but off-convention,
-e.g. a leading capital or an embedded address), or **UNDOCUMENTED** (a placeholder
-name like `func_8024…`, `D_8033…`, `unk02`, `ACT_UNKNOWN_5`). Those classifications
-roll up into a per-category completeness score, and — more usefully — into a
-worklist of exactly what still needs a name.
+variables, structs and their members, global variables, `#define` constants, enum
+members, and object fields (`#define oFoo OBJECT_FIELD_*(…)`) — is classified as
+**GOOD**, **MALFORMED** (named but off-convention, e.g. a leading capital or an
+embedded address), or **UNDOCUMENTED** (a placeholder name like `func_8024…`,
+`D_8033…`, `unk02`, `oUnk94`, `ACT_UNKNOWN_5`). Those classifications roll up into a
+per-category completeness score, and — more usefully — into a worklist of exactly
+what still needs a name.
+
+**`unused` is not a defect.** A matching decompilation must keep unused content,
+and naming it (`MODEL_DOOR_UNUSED`, `gUnusedLoadedPool`, `unused_ice_shard`) is
+the *correct*, documented thing — it records real knowledge, unlike `unk`, which
+records ignorance. Only the address-named ones (`sUnused80226B40`) stay flagged,
+for the address.
 
 ## Current-state engine (`doc_measure.py`)
 
@@ -134,6 +141,21 @@ It's built to stay short and lead with what needs attention: each section is a
 table collapses by default and hides fully-complete families, and **every metric
 is clickable** — a scorecard, a bar, a family, or an entity — to filter the
 worklist to it and jump straight there.
+
+### Documentation comments
+
+Beyond names, there's *prose*: the decomp's house style is a `/** … */` block
+above each function (pervasive in the behaviors). The report measures doc-comment
+coverage **per source area** (`src/<area>/…`), because it varies wildly — `menu`
+is ~92%, `audio` ~20% — and an aggregate would hide that. It's informational (not
+every function needs prose), so it isn't folded into the completeness score; the
+JSON carries it under `doc_comments`.
+
+(An aside on what *didn't* make the cut: a "storage class must match prefix" rule
+— `static`→`s`, `extern`→`g` — was prototyped and dropped. In SM64 the `s`/`g`
+prefix documents *intent*, not the literal `static` keyword: `sAreaYaw` is
+`s`-prefixed but has global linkage. The rule would have produced 500+ false
+positives, so it isn't shipped.)
 
 ### Hosted report (GitHub Pages)
 

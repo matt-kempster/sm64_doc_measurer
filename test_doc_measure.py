@@ -281,6 +281,57 @@ def test_to_json_has_semantic_and_no_family_uniformity():
         assert "conforming" not in next(iter(d["families"].values()))
 
 
+def test_object_fields_are_their_own_kind_not_upper_snake_violations():
+    # #define oFoo OBJECT_FIELD_*(...) is intentionally o+PascalCase. It must be a
+    # distinct kind so it isn't scored as a UPPER_SNAKE constant violation.
+    src = (
+        b"#define oAction OBJECT_FIELD_S32(0x14)\n"
+        b"#define oPosX OBJECT_FIELD_F32(0x06)\n"
+        b"#define oUnk94 OBJECT_FIELD_S16(0x94)\n"
+        b"#define ACT_WALKING 0x04\n"
+    )
+    s = m.extract_source(src, "include/object_fields.h")
+    kinds = {x.name: x.kind for x in s}
+    assert kinds["oAction"] == "object_field" and kinds["oPosX"] == "object_field"
+    assert kinds["ACT_WALKING"] == "constant"  # real constants stay constants
+    # o+PascalCase conforms; UPPER_SNAKE rule does NOT apply to object fields.
+    assert m.convention_violation(find(s, "object_field", "oAction")) is None
+    assert m.convention_violation(mksym("o_action", "object_field"))  # snake is wrong
+    # oUnk94 is a placeholder on the completeness axis.
+    assert find(s, "object_field", "oUnk94").classification == C.UNDOCUMENTED
+
+
+def test_inner_union_members_are_counted():
+    # Anonymous unions/structs expose their fields directly on the parent; those
+    # members were previously dropped entirely.
+    src = b"""
+    struct Object {
+        s16 visible;
+        union {
+            s32 asS32;
+            struct { s16 x; s16 y; } asPoint;
+        };
+    };
+    """
+    members = {x.name for x in m.extract_source(src, "x.h") if x.kind == "member"}
+    assert {"visible", "asS32", "asPoint"} <= members
+
+
+def test_doc_comment_coverage(tmp_path):
+    (tmp_path / "src" / "game").mkdir(parents=True)
+    (tmp_path / "src" / "game" / "a.c").write_text(
+        "/** does a thing */\nvoid documented_fn(void) {}\n"
+        "void undocumented_fn(void) {}\n"
+        "// not a doc comment\nvoid also_undocumented(void) {}\n"
+    )
+    doc = m.doc_comment_coverage(tmp_path)
+    assert doc["total"]["functions"] == 3 and doc["total"]["documented"] == 1
+    assert doc["by_area"]["game"] == {"functions": 3, "documented": 1}
+    # surfaced in json when a root is given, omitted otherwise
+    assert m.to_json([], tmp_path)["doc_comments"]["total"]["functions"] == 3
+    assert m.to_json([])["doc_comments"] is None
+
+
 def test_typedef_struct_members_extracted():
     # The bulk of SM64's types are anonymous `typedef struct { ... } Name;`. They
     # were previously skipped (no struct tag), under-counting structs and members.

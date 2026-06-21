@@ -225,6 +225,15 @@ _TEMPLATE = """<!doctype html>
     </table>
   </details>
 
+  <details class="panel" id="doc-panel">
+    <summary><h2>Documentation comments</h2>
+      <span class="summary-stat" id="doc-stat"></span></summary>
+    <p class="sub">Functions with a <code>/** … */</code> doc comment above them —
+      the decomp's house style. Informational (not every function needs prose), but
+      the spread shows where prose docs are thin: audio is sparse, menu near-complete.</p>
+    <div class="cats" id="cats-doc"></div>
+  </details>
+
   <details class="panel" open id="worklist">
     <summary><h2>Worklist — what to fix</h2>
       <span class="summary-stat" id="worklist-stat"></span></summary>
@@ -325,7 +334,8 @@ function bars(elId, axis, entries) {
     div.innerHTML = `<span class="name">${name}</span>`
       + `<span class="track"><span class="fill" style="width:${(ratio*100).toFixed(1)}%;background:${barColor(ratio)}"></span></span>`
       + `<span class="pct">${(ratio*100).toFixed(1)}% <small>${good}/${total}</small></span>`;
-    div.addEventListener('click', () => focusWorklist({ axis, kind: name }));
+    if (axis) div.addEventListener('click', () => focusWorklist({ axis, kind: name }));
+    else div.style.cursor = 'default';
     el.appendChild(div);
   }
 }
@@ -391,6 +401,18 @@ famBody.addEventListener('click', ev => {
   if (tr) focusWorklist({ group: tr.dataset.group });
 });
 renderFamilies();
+
+// --- documentation-comment coverage (informational; hidden if not measured) ---
+const DOC = DATA.doc_comments;
+if (DOC && DOC.total.functions) {
+  document.getElementById('doc-stat').textContent =
+    Math.round(100 * DOC.total.documented / DOC.total.functions) + '% have a /** */';
+  bars('cats-doc', '', Object.entries(DOC.by_area)
+    .sort((a, b) => (a[1].documented / a[1].functions) - (b[1].documented / b[1].functions))
+    .map(([area, c]) => [area, c.documented, c.functions]));
+} else {
+  document.getElementById('doc-panel').style.display = 'none';
+}
 
 // --- worklist (all axes combined) ---
 const rows = [

@@ -131,6 +131,28 @@ def _is_prototype(decl) -> bool:
     return False
 
 
+def _collect_members(body):
+    """Yield (name, field_node) for every member declared in a struct/union body.
+
+    Descends into anonymous nested unions/structs -- whose fields are accessed
+    directly on the parent (e.g. the unnamed unions inside ``struct Object``), so
+    they're real members that were previously dropped entirely."""
+    for fd in body.named_children:
+        if fd.type != "field_declaration":
+            continue
+        names = _declaration_names(fd)
+        if names:
+            for n in names:
+                yield n, fd
+        else:
+            # An anonymous aggregate field (no member name): recurse into it.
+            for c in fd.children:
+                if c.type in ("struct_specifier", "union_specifier"):
+                    inner = c.child_by_field_name("body")
+                    if inner is not None:
+                        yield from _collect_members(inner)
+
+
 def _typedef_name(td) -> Optional[str]:
     """The new type name introduced by a ``type_definition`` (the typedef name).
 
@@ -282,6 +304,7 @@ CLASSIFIERS = {
     "global": classify_global_var,
     "constant": classify_constant,  # object-like #define
     "enum": classify_constant,  # enum member
+    "object_field": classify_constant,  # #define oFoo OBJECT_FIELD_*(...)
 }
 
 
@@ -310,7 +333,15 @@ def _classify(name: str, kind: str) -> Classification:
 # legible separately.
 
 # Kinds that carry a convention rule (args/locals have no settled casing rule).
-CONVENTION_KINDS = ("function", "struct", "member", "global", "constant", "enum")
+CONVENTION_KINDS = (
+    "function",
+    "struct",
+    "member",
+    "global",
+    "constant",
+    "enum",
+    "object_field",
+)
 
 _SNAKE = re.compile(r"[a-z][a-z0-9_]*$")  # set_mario_action, dialog_table_eu_en
 _PASCAL = re.compile(r"[A-Z][A-Za-z0-9]*$")  # MarioState
@@ -318,6 +349,7 @@ _CAMEL = re.compile(r"[a-z][A-Za-z0-9]*$")  # rawStickX
 _UPPER_SNAKE = re.compile(r"[A-Z][A-Z0-9_]*$")  # ACT_WALKING, SOUND_GENERAL_COIN
 _BHV = re.compile(r"bhv[A-Z]")  # bhvStarDoor
 _GLOBAL_PREFIX = re.compile(r"(?:[gs]|gd|bhv)[A-Z]")  # gMarioState, sCount, gdFoo
+_OBJ_FIELD = re.compile(r"o[A-Z][A-Za-z0-9]*$")  # oAction, oIntangibleTimer
 
 
 def completeness_reason(sym: Symbol) -> str:
@@ -338,16 +370,14 @@ def completeness_reason(sym: Symbol) -> str:
             return "auto-generated data symbol (D_<addr>) — give it a real name"
         if low.startswith("unk") or low.startswith("u_") or low.startswith("d_"):
             return "unknown field (unk…) — identify and name it"
-        if "unused" in low:
-            return "marked unused — name it or remove it"
         if re.match(r"sp[0-9A-Fa-f]+$", name):
             return "raw stack slot (sp<offset>) — give it a real name"
+        if re.search(r"[0-9A-Fa-f]{4,}", name):
+            return "embedded ROM address in name — give it a real name"
         if name.startswith("arg") or re.fullmatch(r"a[0-9]", name):
             return "positional placeholder (arg<n>) — name the parameter"
         if re.fullmatch(r"[abf][0-9]+", name) or re.match(r"val[0-9A-Fa-f]*$", name):
             return "register/temp placeholder — give it a real name"
-        if re.search(r"[0-9A-Fa-f]{4,}", name):
-            return "embedded ROM address in name — give it a real name"
         if len(name) == 1:
             return "single-letter placeholder — give it a descriptive name"
         return "placeholder name — give it a real name"
@@ -389,6 +419,12 @@ def convention_violation(sym: Symbol) -> Optional[str]:
     elif sym.kind in ("constant", "enum"):
         if not _UPPER_SNAKE.match(name):
             return "constant should be UPPER_SNAKE"
+    elif sym.kind == "object_field":
+        # Object fields are #define oFoo OBJECT_FIELD_*(...) -- intentionally
+        # o + PascalCase, NOT UPPER_SNAKE (so they must not be lumped with
+        # constants, or all ~700 would read as violations).
+        if not _OBJ_FIELD.match(name):
+            return "object field should be o + PascalCase"
     return None
 
 
@@ -684,13 +720,12 @@ def extract_source(src: bytes, rel: str) -> List[Symbol]:
         body = struct_node.child_by_field_name("body")
         if not sname or body is None or re.match(r"Dummy[0-9]+$", sname):
             return
-        fields = [fd for fd in body.named_children if fd.type == "field_declaration"]
-        if not any(_declaration_names(fd) for fd in fields):
-            return  # forward-ish decl with no named fields; nothing to score
+        members = list(_collect_members(body))
+        if not members:  # forward-ish decl with no named fields; nothing to score
+            return
         add(sname, "struct", struct_node)
-        for fd in fields:
-            for mname in _declaration_names(fd):
-                add(mname, "member", fd)
+        for mname, fd in members:
+            add(mname, "member", fd)
 
     for st in _iter(root, "struct_specifier"):
         name_node = st.child_by_field_name("name")
@@ -718,6 +753,9 @@ def extract_source(src: bytes, rel: str) -> List[Symbol]:
 
     # Object-like #define constants. Skip include guards (they aren't real
     # constants): names ending in _H / _H_, or wrapped in underscores (_SM64_H_).
+    # Object fields (`#define oFoo OBJECT_FIELD_*(...)`) get their own kind: they
+    # are intentionally o+PascalCase, not UPPER_SNAKE, so scoring them as constants
+    # would (wrongly) read all ~700 as convention violations.
     for d in _iter(root, "preproc_def"):
         nm = d.child_by_field_name("name")
         if nm is None:
@@ -725,7 +763,8 @@ def extract_source(src: bytes, rel: str) -> List[Symbol]:
         name = nm.text.decode()
         if _is_include_guard(name):
             continue
-        add(name, "constant", d)
+        kind = "object_field" if re.match(r"o[A-Z]", name) else "constant"
+        add(name, kind, d)
 
     # Enum members.
     for e in _iter(root, "enumerator"):
@@ -764,6 +803,45 @@ def collect_symbols(root: Path) -> List[Symbol]:
             continue
         symbols.extend(extract_file(path, rel))
     return symbols
+
+
+def _has_doc_comment(fn) -> bool:
+    """True if a ``/** ... */`` block comment immediately precedes a function."""
+    prev = fn.prev_sibling
+    return prev is not None and prev.type == "comment" and prev.text.startswith(b"/**")
+
+
+def doc_comment_coverage(root: Path) -> dict:
+    """Per-area count of functions carrying a ``/** ... */`` doc comment.
+
+    A direct *prose*-documentation measure, distinct from naming: the decomp's
+    house style (seen throughout the behaviors) is a ``/**`` block above each
+    function. Reported per source area (src/<area>/...) because coverage varies
+    wildly -- menu is near-complete, audio is sparse -- and an aggregate hides
+    that. Informational: not every function needs prose, so this is not folded
+    into the completeness score."""
+    areas: Dict[str, List[int]] = {}  # area -> [functions, documented]
+    for path in sorted((root / "src").glob("**/*.c")):
+        rel = str(path.relative_to(root))
+        if should_ignore_file(rel):
+            continue
+        parts = rel.split("/")
+        area = parts[1] if len(parts) > 2 else "src"
+        tree = parse_source(path.read_bytes())
+        a = areas.setdefault(area, [0, 0])
+        for fn in _iter(tree.root_node, "function_definition"):
+            a[0] += 1
+            if _has_doc_comment(fn):
+                a[1] += 1
+    return {
+        "total": {
+            "functions": sum(v[0] for v in areas.values()),
+            "documented": sum(v[1] for v in areas.values()),
+        },
+        "by_area": {
+            k: {"functions": v[0], "documented": v[1]} for k, v in sorted(areas.items())
+        },
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -922,6 +1000,31 @@ def print_report(
             print(f"    [S] {f.name}  @ {f.file}:{f.line} — {f.detail}")
         if len(findings) > samples:
             print(f"    … and {len(findings) - samples} more")
+
+    # Doc-comment coverage (prose docs), per source area.
+    if root is not None:
+        doc = doc_comment_coverage(root)
+        t = doc["total"]
+        if t["functions"]:
+            pct = 100 * t["documented"] / t["functions"]
+            print(
+                f"\nDoc-comment coverage: {t['documented']}/{t['functions']} "
+                f"functions ({pct:.0f}%), by area:"
+            )
+            for area, c in sorted(
+                doc["by_area"].items(),
+                key=lambda kv: (
+                    kv[1]["documented"] / kv[1]["functions"]
+                    if kv[1]["functions"]
+                    else 1
+                ),
+            ):
+                if c["functions"]:
+                    p = 100 * c["documented"] / c["functions"]
+                    print(
+                        f"  {area:<10} {c['documented']:>4}/{c['functions']:<5}"
+                        f" {_bar(p / 100)} {p:4.0f}%"
+                    )
     return score, uscore
 
 
@@ -977,6 +1080,7 @@ def to_json(symbols: List[Symbol], root: Optional[Path] = None) -> dict:
             }
             for f in semantic_findings
         ],
+        "doc_comments": doc_comment_coverage(root) if root is not None else None,
     }
 
 
