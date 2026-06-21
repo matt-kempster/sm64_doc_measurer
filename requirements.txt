@@ -1,0 +1,13 @@
+# Modernized tree-sitter engine (doc_measure.py).
+# Pinned to 0.21.x: the Language()/Parser() API changed in 0.22+.
+tree-sitter>=0.21,<0.22
+tree-sitter-c>=0.21,<0.22
+
+# Test runner.
+pytest
+
+# --- Legacy pycparser engine (sm64_parse.py / generate_site.py) only ---
+# Needs a *built* decomp (generated headers + NON_MATCHING). Not required for
+# doc_measure.py.
+# pycparser
+# htmldoom
