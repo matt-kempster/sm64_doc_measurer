@@ -88,6 +88,22 @@ def test_score_and_counts():
     assert 0.0 < score < 1.0
 
 
+def test_arg_real_words_not_flagged_as_stack_slots():
+    # Regression: the original "starts with sp and short" rule flagged real
+    # words. Only sp+hex offsets (and not space/speed) are stack slots.
+    for good in ("speed", "space", "spawn", "split"):
+        assert m.classify_arg(good) == C.GOOD, good
+    for placeholder in ("sp1C", "sp24", "spC"):
+        assert m.classify_arg(placeholder) == C.UNDOCUMENTED, placeholder
+
+
+def test_allcaps_macro_not_counted_as_function():
+    # BAD_RETURN(s32) and friends are function-like macros, not functions.
+    src = b"s32 BAD_RETURN(s32) real_func(void) { s32 i; return i; }\n"
+    fns = {s.name for s in m.extract_source(src, "x.c") if s.kind == "function"}
+    assert "BAD_RETURN" not in fns
+
+
 def test_preproc_blanking_keeps_guarded_code():
     src = b"""
 #ifdef VERSION_JP

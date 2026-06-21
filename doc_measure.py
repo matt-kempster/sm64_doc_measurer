@@ -167,7 +167,10 @@ def classify_struct_name(name: str) -> Classification:
 
 def classify_arg(arg: str) -> Classification:
     if (
-        (arg.startswith("sp") and len(arg) <= 5)
+        # Stack-slot names: "sp" + hex offset. Use the same regex (and the
+        # space/speed exception) as classify_local_var, rather than the original
+        # "starts with sp and short", which flagged real words like spawn/space.
+        (re.match(r"sp[0-9A-Fa-f]+$", arg) and arg not in ["space", "speed"])
         or arg.startswith("arg")
         or (arg.startswith("a") and len(arg) <= 2)
         or (len(arg) == 1 and arg not in ["m", "x", "y", "z"])
@@ -269,7 +272,13 @@ def extract_source(src: bytes, rel: str) -> List[Symbol]:
 
     # Functions, their args, and their locals.
     for fn in _iter(root, "function_definition"):
-        add(function_name(fn), "function", fn)
+        fname = function_name(fn)
+        # A function-like macro in declarator position (e.g. BAD_RETURN(s32))
+        # parses as a "function" named in ALL_CAPS. Real sm64 functions are
+        # snake_case, never all-caps, so skip those parse artifacts.
+        if fname and re.fullmatch(r"[A-Z][A-Z0-9_]*", fname):
+            fname = None
+        add(fname, "function", fn)
         for arg in function_params(fn):
             add(arg, "arg", fn)
         body = fn.child_by_field_name("body")
