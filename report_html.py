@@ -39,8 +39,9 @@ _TEMPLATE = """<!doctype html>
   .cat {{ display: grid; grid-template-columns: 90px 1fr 130px;
           align-items: center; gap: 12px; }}
   .cat .name {{ color: var(--muted); }}
-  .track {{ background: var(--line); border-radius: 6px; height: 14px; overflow: hidden; }}
-  .fill {{ height: 100%; background: var(--good); }}
+  .track {{ display: block; background: var(--line); border-radius: 6px;
+            height: 14px; overflow: hidden; }}
+  .fill {{ display: block; height: 100%; background: var(--good); }}
   .cat .pct {{ text-align: right; font-variant-numeric: tabular-nums; }}
   .cat .pct small {{ color: var(--muted); }}
   .controls {{ display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
