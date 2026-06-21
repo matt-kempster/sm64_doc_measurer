@@ -6,6 +6,11 @@ dark/light toggle, three headline scores (completeness, uniformity, wired-up),
 per-kind bars for the two name-quality axes, a completeness-by-family table, a
 semantic cross-reference table, and one sortable/filterable worklist.
 
+The page is built to stay short: each section is a collapsible panel showing a
+headline stat when closed, the long family table collapses by default and hides
+fully-complete (100%) families, and every metric is *clickable* — a bar, a family
+row, an entity, or a scorecard — to filter the worklist to it and jump there.
+
 Substitution is by token (``__DATA__`` / ``__LABEL__``) rather than ``str.format``
 so the CSS/JS braces don't need escaping.
 """
@@ -55,45 +60,57 @@ _TEMPLATE = """<!doctype html>
   }
   .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px 72px; }
   header { display: flex; align-items: flex-start; justify-content: space-between;
-           gap: 16px; padding: 28px 0 6px; }
+           gap: 16px; padding: 24px 0 4px; }
   h1 { margin: 0; font-size: 20px; letter-spacing: -.01em; }
   h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em;
-       color: var(--muted); margin: 0 0 4px; }
-  .sub { color: var(--muted); font-size: 12.5px; margin: 0 0 14px; max-width: 70ch; }
+       color: var(--muted); margin: 0; }
+  .sub { color: var(--muted); font-size: 12.5px; margin: 8px 0 12px; max-width: 74ch; }
   .label { color: var(--muted); margin: 4px 0 0; font-size: 13px; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; }
   .theme-btn { flex: none; background: var(--panel); color: var(--fg);
     border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px;
     font-size: 13px; cursor: pointer; box-shadow: var(--shadow); }
   .theme-btn:hover { border-color: var(--accent); }
 
-  /* headline scorecards */
+  /* headline scorecards (clickable) */
   .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
-           margin: 18px 0 8px; }
+           margin: 16px 0 6px; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-          padding: 16px 18px; box-shadow: var(--shadow); }
-  .score { font-size: 42px; font-weight: 700; line-height: 1.05;
+          padding: 14px 16px; box-shadow: var(--shadow); cursor: pointer; transition: border-color .12s; }
+  .card:hover { border-color: var(--accent); }
+  .score { font-size: 38px; font-weight: 700; line-height: 1.05;
            font-variant-numeric: tabular-nums; }
   .statlabel { color: var(--muted); font-size: 12px; text-transform: uppercase;
-               letter-spacing: .06em; margin-top: 8px; }
+               letter-spacing: .06em; margin-top: 6px; }
   .statnote { color: var(--muted); font-size: 12px; margin-top: 2px; }
 
-  section.panel { background: var(--panel); border: 1px solid var(--line);
-    border-radius: 12px; padding: 18px 20px; margin-top: 18px; box-shadow: var(--shadow); }
+  details.panel { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 12px 18px; margin-top: 14px; box-shadow: var(--shadow); }
+  details.panel > summary { cursor: pointer; list-style: none; display: flex;
+    align-items: baseline; gap: 10px; padding: 4px 0; }
+  details.panel > summary::-webkit-details-marker { display: none; }
+  details.panel > summary::before { content: "▸"; color: var(--muted);
+    font-size: 11px; transition: transform .15s; }
+  details.panel[open] > summary::before { transform: rotate(90deg); }
+  .summary-stat { color: var(--muted); font-size: 12.5px; font-weight: 600; margin-left: auto; }
 
-  .cats { display: grid; gap: 9px; }
-  .cat { display: grid; grid-template-columns: 96px 1fr 132px; align-items: center; gap: 12px; }
+  .cats { display: grid; gap: 8px; margin-top: 6px; }
+  .cat { display: grid; grid-template-columns: 96px 1fr 132px; align-items: center;
+         gap: 12px; cursor: pointer; border-radius: 6px; padding: 1px 0; }
+  .cat:hover .name { color: var(--fg); text-decoration: underline; }
   .cat .name { color: var(--muted); font-variant-numeric: tabular-nums; }
   .track { display: block; background: var(--panel2); border: 1px solid var(--line);
-           border-radius: 6px; height: 16px; overflow: hidden; }
+           border-radius: 6px; height: 15px; overflow: hidden; }
   .fill { display: block; height: 100%; border-radius: 5px 0 0 5px; transition: width .2s; }
   .cat .pct { text-align: right; font-variant-numeric: tabular-nums; }
   .cat .pct small { color: var(--muted); }
 
-  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0; }
   input, select { background: var(--bg); color: var(--fg); border: 1px solid var(--line);
     border-radius: 8px; padding: 8px 10px; font-size: 13px; }
   input[type=search] { flex: 1; min-width: 220px; }
   input:focus, select:focus { outline: none; border-color: var(--accent); }
+  label.chk { color: var(--muted); font-size: 12.5px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
   .count { color: var(--muted); font-size: 13px; }
 
   table { width: 100%; border-collapse: collapse; }
@@ -104,6 +121,7 @@ _TEMPLATE = """<!doctype html>
        text-transform: uppercase; letter-spacing: .04em; }
   th:hover { color: var(--fg); }
   tbody tr:hover { background: var(--panel2); }
+  tr.clickable { cursor: pointer; }
   td.name, td.fam { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   td.file { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; }
   td.reason { color: var(--fg); font-size: 12.5px; }
@@ -120,7 +138,7 @@ _TEMPLATE = """<!doctype html>
   .tag.M { background: color-mix(in srgb, var(--mal) 20%, transparent); color: var(--mal); }
   .tag.C { background: color-mix(in srgb, var(--conv) 18%, transparent); color: var(--conv); }
   .tag.S { background: color-mix(in srgb, var(--sem) 20%, transparent); color: var(--sem); }
-  .legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 0 0 14px; font-size: 12.5px;
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 4px 0 12px; font-size: 12.5px;
     color: var(--muted); }
   .legend span b { color: var(--fg); font-weight: 600; }
 </style>
@@ -136,39 +154,67 @@ _TEMPLATE = """<!doctype html>
   </header>
 
   <div class="stats">
-    <div class="card">
+    <div class="card" id="card-complete">
       <div class="score" id="score" style="color:var(--good)"></div>
       <div class="statlabel">completeness</div>
-      <div class="statnote">symbols with a real name</div>
+      <div class="statnote">symbols with a real name →</div>
     </div>
-    <div class="card">
+    <div class="card" id="card-uniform">
       <div class="score" id="uscore" style="color:var(--conv)"></div>
       <div class="statlabel">uniformity</div>
-      <div class="statnote">those names following convention</div>
+      <div class="statnote">names following convention →</div>
     </div>
-    <div class="card">
+    <div class="card" id="card-sem">
       <div class="score" id="semscore" style="color:var(--sem)"></div>
       <div class="statlabel">wired up</div>
-      <div class="statnote" id="semnote">entities linked to their implementation</div>
+      <div class="statnote" id="semnote">entities linked to their impl →</div>
     </div>
   </div>
 
-  <section class="panel">
-    <h2>Completeness — do symbols have real names?</h2>
-    <p class="sub">Each named symbol the decomp exposes is GOOD, MALFORMED (named but
-      off-shape), or UNDOCUMENTED (a placeholder like <code>func_8024…</code>). Bars
-      show the GOOD fraction per kind.</p>
+  <details class="panel" open>
+    <summary><h2>Completeness — do symbols have real names?</h2>
+      <span class="summary-stat" id="complete-stat"></span></summary>
+    <p class="sub">GOOD vs. MALFORMED (named but off-shape) vs. UNDOCUMENTED
+      (a placeholder like <code>func_8024…</code>). Click a kind to see its worklist.</p>
     <div class="cats" id="cats-complete"></div>
-  </section>
+  </details>
 
-  <section class="panel">
-    <h2>Completeness by entity family</h2>
+  <details class="panel" open>
+    <summary><h2>Semantic entities — are they wired up?</h2>
+      <span class="summary-stat" id="sem-stat"></span></summary>
+    <p class="sub">A prefix says what something is <em>called</em>; this asks whether
+      it's <em>connected</em> — cross-referencing a symbol to its implementation
+      (a handler, text table, level script, audio file). Click an entity to see its gaps.</p>
+    <table>
+      <thead><tr>
+        <th>entity</th><th>cross-reference</th><th>linked</th><th>gaps</th>
+      </tr></thead>
+      <tbody id="sem-rows"></tbody>
+    </table>
+  </details>
+
+  <details class="panel" open>
+    <summary><h2>Uniformity — do those names follow convention?</h2>
+      <span class="summary-stat" id="uniform-stat"></span></summary>
+    <p class="sub">Of the real names, which follow the role-aware conventions
+      (functions <code>snake_case</code>, types <code>PascalCase</code>, members
+      <code>camelCase</code>, globals a <code>g</code>/<code>s</code> prefix,
+      constants <code>UPPER_SNAKE</code>)? Click a kind to see its violations.</p>
+    <div class="cats" id="cats-uniform"></div>
+  </details>
+
+  <details class="panel">
+    <summary><h2>Completeness by entity family</h2>
+      <span class="summary-stat" id="family-stat"></span></summary>
     <p class="sub">Constants &amp; enums regrouped by prefix — ACT_* (Mario actions),
-      SOUND_*, MODEL_*, … — so a domain entity is navigable. This is the
-      <b>completeness</b> axis (what fraction have real, non-placeholder names), which
-      genuinely varies per family. It is <em>not</em> the old per-family uniformity,
-      which was tautological (a family is its prefix) and was removed.</p>
-    <div class="controls"><span class="count" id="fam-count"></span></div>
+      SOUND_*, MODEL_*, … This is the <b>completeness</b> axis (what fraction have
+      real, non-placeholder names), which genuinely varies per family — <em>not</em>
+      the old per-family uniformity, which was tautological and was removed. Click a
+      family to see its members.</p>
+    <div class="controls">
+      <label class="chk"><input type="checkbox" id="fam-all"> show fully-complete families</label>
+      <span class="count" id="fam-count"></span>
+    </div>
     <table>
       <thead><tr>
         <th data-fk="family">family</th>
@@ -177,38 +223,16 @@ _TEMPLATE = """<!doctype html>
       </tr></thead>
       <tbody id="fam-rows"></tbody>
     </table>
-  </section>
+  </details>
 
-  <section class="panel">
-    <h2>Uniformity — do those names follow convention?</h2>
-    <p class="sub">Of the names that are real, do they follow the project's role-aware
-      conventions (functions <code>snake_case</code>, types <code>PascalCase</code>,
-      members <code>camelCase</code>, globals a <code>g</code>/<code>s</code> prefix,
-      constants <code>UPPER_SNAKE</code>)?</p>
-    <div class="cats" id="cats-uniform"></div>
-  </section>
-
-  <section class="panel">
-    <h2>Semantic entities — are they wired up?</h2>
-    <p class="sub">A prefix says what something is <em>called</em>; a semantic entity
-      asks whether it's <em>connected</em> — by cross-referencing a symbol to its
-      implementation (a handler, a text table, a level script, an audio file). Not
-      tautological: the check crosses kinds and files.</p>
-    <table>
-      <thead><tr>
-        <th>entity</th><th>cross-reference</th><th>linked</th><th>gaps</th>
-      </tr></thead>
-      <tbody id="sem-rows"></tbody>
-    </table>
-  </section>
-
-  <section class="panel">
-    <h2>Worklist — what to fix</h2>
+  <details class="panel" open id="worklist">
+    <summary><h2>Worklist — what to fix</h2>
+      <span class="summary-stat" id="worklist-stat"></span></summary>
     <div class="legend">
       <span><span class="tag U">U</span> <b>undocumented</b> placeholder name</span>
       <span><span class="tag M">M</span> <b>malformed</b> off-convention name</span>
       <span><span class="tag C">C</span> <b>convention</b> uniformity violation</span>
-      <span><span class="tag S">S</span> <b>semantic</b> not wired to its implementation</span>
+      <span><span class="tag S">S</span> <b>semantic</b> not wired to its impl</span>
     </div>
     <div class="controls">
       <input type="search" id="q" placeholder="filter by name or file…">
@@ -220,13 +244,14 @@ _TEMPLATE = """<!doctype html>
       </select>
       <select id="kind"></select>
       <select id="famsel"></select>
+      <button class="theme-btn" id="clear">clear</button>
       <span class="count" id="count"></span>
     </div>
     <table>
       <thead><tr>
         <th data-k="tag">!</th>
         <th data-k="kind">kind</th>
-        <th data-k="family">family</th>
+        <th data-k="family">group</th>
         <th data-k="name">name</th>
         <th data-k="file">file</th>
         <th data-k="line">line</th>
@@ -234,7 +259,7 @@ _TEMPLATE = """<!doctype html>
       </tr></thead>
       <tbody id="rows"></tbody>
     </table>
-  </section>
+  </details>
 </div>
 <script>
 const DATA = __DATA__;
@@ -258,19 +283,40 @@ function pctCell(ratio) {
   return `<span class="minibar"><span style="width:${(ratio*100).toFixed(1)}%;background:${barColor(ratio)}"></span></span>${p}%`;
 }
 
-// headline scores
+// --- worklist focus: set filters and jump there (the heart of "click a thing") ---
+const worklistEl = document.getElementById('worklist');
+const q = document.getElementById('q'), kindSel = document.getElementById('kind');
+const axisSel = document.getElementById('axis'), famSel = document.getElementById('famsel');
+const tbody = document.getElementById('rows'), countEl = document.getElementById('count');
+
+function setSel(sel, value) {
+  // only apply if the option exists, else fall back to "all"
+  sel.value = [...sel.options].some(o => o.value === value) ? value : '';
+}
+function focusWorklist({ axis = '', kind = '', group = '' } = {}) {
+  q.value = '';
+  setSel(axisSel, axis); setSel(kindSel, kind); setSel(famSel, group);
+  render();
+  worklistEl.open = true;
+  worklistEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// headline scores (also clickable)
 document.getElementById('score').textContent = (DATA.score * 100).toFixed(1) + '%';
 document.getElementById('uscore').textContent = ((DATA.uniformity_score ?? 1) * 100).toFixed(1) + '%';
-const SEM = DATA.semantic_entities || [];
+const SEM = (DATA.semantic_entities || []).slice().sort((a, b) => b.gaps - a.gaps);
 const semTot = SEM.reduce((a, e) => a + e.members, 0);
 const semLink = SEM.reduce((a, e) => a + e.linked, 0);
+const semGaps = SEM.reduce((a, e) => a + e.gaps, 0);
 document.getElementById('semscore').textContent =
   (semTot ? (100 * semLink / semTot) : 100).toFixed(1) + '%';
-document.getElementById('semnote').textContent =
-  `${semLink}/${semTot} across ${SEM.length} entities`;
+document.getElementById('semnote').textContent = `${semLink}/${semTot} linked →`;
+document.getElementById('card-complete').addEventListener('click', () => focusWorklist({ axis: 'completeness' }));
+document.getElementById('card-uniform').addEventListener('click', () => focusWorklist({ axis: 'convention' }));
+document.getElementById('card-sem').addEventListener('click', () => focusWorklist({ axis: 'semantic' }));
 
-// --- axis bars ---
-function bars(elId, entries) {
+// --- axis bars (click a kind -> worklist) ---
+function bars(elId, axis, entries) {
   const el = document.getElementById(elId);
   for (const [name, good, total] of entries) {
     const ratio = total ? good / total : 1;
@@ -279,49 +325,71 @@ function bars(elId, entries) {
     div.innerHTML = `<span class="name">${name}</span>`
       + `<span class="track"><span class="fill" style="width:${(ratio*100).toFixed(1)}%;background:${barColor(ratio)}"></span></span>`
       + `<span class="pct">${(ratio*100).toFixed(1)}% <small>${good}/${total}</small></span>`;
+    div.addEventListener('click', () => focusWorklist({ axis, kind: name }));
     el.appendChild(div);
   }
 }
-bars('cats-complete', KINDS.map(k => {
+bars('cats-complete', 'completeness', KINDS.map(k => {
   const c = DATA.categories[k];
   return [k, c.GOOD, c.GOOD + c.MALFORMED + c.UNDOCUMENTED];
 }));
-bars('cats-uniform', Object.keys(DATA.conventions || {}).map(k => {
+bars('cats-uniform', 'convention', Object.keys(DATA.conventions || {}).map(k => {
   const c = DATA.conventions[k];
   return [k, c.CONFORMING, c.CONFORMING + c.VIOLATION];
 }));
+const compTotals = KINDS.reduce((a, k) => {
+  const c = DATA.categories[k]; a.g += c.GOOD; a.t += c.GOOD + c.MALFORMED + c.UNDOCUMENTED; return a;
+}, { g: 0, t: 0 });
+document.getElementById('complete-stat').textContent =
+  (compTotals.t - compTotals.g).toLocaleString() + ' to fix';
+document.getElementById('uniform-stat').textContent =
+  (DATA.violations || []).length.toLocaleString() + ' violations';
 
-// --- semantic entities table ---
+// --- semantic entities table (gaps first; click -> worklist) ---
+document.getElementById('sem-stat').textContent = semGaps + ' gaps';
 document.getElementById('sem-rows').innerHTML = SEM.map(e => {
   const ratio = e.members ? e.linked / e.members : 1;
-  return `<tr><td class="fam">${esc(e.entity)}</td>`
+  return `<tr class="clickable" data-entity="${esc(e.entity)}"><td class="fam">${esc(e.entity)}</td>`
     + `<td class="reason">${esc(e.link)}</td>`
     + `<td>${pctCell(ratio)} <small class="count">${e.linked}/${e.members}</small></td>`
     + `<td>${e.gaps}</td></tr>`;
 }).join('') || '<tr><td colspan="4" class="count">none</td></tr>';
+document.getElementById('sem-rows').addEventListener('click', ev => {
+  const tr = ev.target.closest('tr[data-entity]');
+  if (tr) focusWorklist({ axis: 'semantic', group: tr.dataset.entity });
+});
 
-// --- completeness-by-family table (sortable) ---
+// --- completeness-by-family table (sortable, hides 100% by default, click -> worklist) ---
 const FAMILIES = Object.entries(DATA.families || {}).map(([family, c]) => ({
   family, count: c.count, complete: c.count ? c.good / c.count : 1,
 }));
-let famKey = 'complete', famDir = 1;
+let famKey = 'complete', famDir = 1, famShowAll = false;
 const famBody = document.getElementById('fam-rows');
-document.getElementById('fam-count').textContent = FAMILIES.length + ' families';
+const famCount = document.getElementById('fam-count');
+const incomplete = FAMILIES.filter(f => f.complete < 1).length;
+document.getElementById('family-stat').textContent = incomplete + ' need work';
 function renderFamilies() {
-  FAMILIES.sort((a, b) => {
+  const view = (famShowAll ? FAMILIES : FAMILIES.filter(f => f.complete < 1)).slice();
+  view.sort((a, b) => {
     let x = a[famKey], y = b[famKey];
     return (x < y ? -1 : x > y ? 1 : 0) * famDir;
   });
-  famBody.innerHTML = FAMILIES.map(f =>
-    `<tr><td class="fam">${esc(f.family)}</td><td>${f.count}</td>`
-    + `<td>${pctCell(f.complete)}</td></tr>`
-  ).join('');
+  famCount.textContent = `${view.length} of ${FAMILIES.length} families`;
+  famBody.innerHTML = view.map(f =>
+    `<tr class="clickable" data-group="${esc(f.family)}"><td class="fam">${esc(f.family)}</td>`
+    + `<td>${f.count}</td><td>${pctCell(f.complete)}</td></tr>`
+  ).join('') || '<tr><td colspan="3" class="count">all families fully complete 🎉</td></tr>';
 }
 document.querySelectorAll('th[data-fk]').forEach(th => th.addEventListener('click', () => {
   const k = th.dataset.fk;
   if (k === famKey) famDir = -famDir; else { famKey = k; famDir = 1; }
   renderFamilies();
 }));
+document.getElementById('fam-all').addEventListener('change', e => { famShowAll = e.target.checked; renderFamilies(); });
+famBody.addEventListener('click', ev => {
+  const tr = ev.target.closest('tr[data-group]');
+  if (tr) focusWorklist({ group: tr.dataset.group });
+});
 renderFamilies();
 
 // --- worklist (all axes combined) ---
@@ -344,16 +412,14 @@ const rows = [
 ];
 
 let sortKey = 'file', sortDir = 1;
-const q = document.getElementById('q'), kindSel = document.getElementById('kind');
-const axisSel = document.getElementById('axis'), famSel = document.getElementById('famsel');
-const tbody = document.getElementById('rows'), countEl = document.getElementById('count');
 
 const allKinds = [...new Set(rows.map(r => r.kind))].filter(Boolean).sort();
 kindSel.innerHTML = '<option value="">all kinds</option>'
   + allKinds.map(k => `<option value="${k}">${k}</option>`).join('');
-const famOpts = FAMILIES.slice().sort((a, b) => b.count - a.count).map(f => f.family);
-famSel.innerHTML = '<option value="">all families</option>'
-  + famOpts.map(f => `<option value="${esc(f)}">${esc(f)}</option>`).join('');
+// group filter = every distinct group present in the worklist (prefix families + entities)
+const groupOpts = [...new Set(rows.map(r => r.family).filter(Boolean))].sort();
+famSel.innerHTML = '<option value="">all groups</option>'
+  + groupOpts.map(f => `<option value="${esc(f)}">${esc(f)}</option>`).join('');
 
 function render() {
   const term = q.value.toLowerCase(), fk = kindSel.value, fa = axisSel.value, ff = famSel.value;
@@ -366,6 +432,7 @@ function render() {
   });
   countEl.textContent = view.length.toLocaleString() + ' of '
     + rows.length.toLocaleString() + ' items';
+  document.getElementById('worklist-stat').textContent = rows.length.toLocaleString() + ' items';
   const MAX = 2000;
   tbody.innerHTML = view.slice(0, MAX).map(r =>
     `<tr><td><span class="tag ${r.tag}">${r.tag}</span></td>`
@@ -385,6 +452,9 @@ document.querySelectorAll('th[data-k]').forEach(th => th.addEventListener('click
   render();
 }));
 [q, kindSel, axisSel, famSel].forEach(el => el.addEventListener('input', render));
+document.getElementById('clear').addEventListener('click', () => {
+  q.value = ''; axisSel.value = ''; kindSel.value = ''; famSel.value = ''; render();
+});
 render();
 </script>
 </body>

@@ -131,6 +131,12 @@ The HTML is self-contained (data embedded, no external assets) and has a
 three headline scores, per-kind bars colored by health, the family and semantic
 tables, and one sortable/filterable worklist with a tag legend (`U`/`M`/`C`/`S`).
 
+It's built to stay short and lead with what needs attention: each section is a
+**collapsible panel** that shows its headline stat when closed, the long family
+table collapses by default and hides fully-complete families, and **every metric
+is clickable** — a scorecard, a bar, a family, or an entity — to filter the
+worklist to it and jump straight there.
+
 ### Hosted report (GitHub Pages)
 
 `.github/workflows/pages.yml` checks out the latest `n64decomp/sm64`, runs the
