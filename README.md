@@ -82,9 +82,26 @@ Beyond the C-syntactic kind, constants and enum members are grouped into
 `DIALOG_*`, `bhv*` (behaviors), … — so a domain entity like "Mario actions" is a
 named, navigable thing rather than an anonymous slice of "constant". Families are
 auto-discovered (any prefix with ≥10 members; the long tail collapses to
-`(other)`), each scored on both axes, and the worklist can be filtered to one
-family. In the JSON they're under `families`, and each worklist row carries its
-`family`.
+`(other)`), scored by completeness, and the worklist can be filtered to one
+family. (Per-family *uniformity* is deliberately not reported: a family is a
+prefix group, so "do its members share the prefix?" is true by construction.)
+
+### Semantic entities
+
+A prefix family answers "what's it called?"; a **semantic entity** answers "is it
+wired up?" — by cross-referencing a symbol to its *implementation*. This isn't
+tautological, because the check crosses kinds. Each entity is domain knowledge,
+so it's a small curated registry. The first:
+
+- **Mario action** — an `ACT_X` constant (in `sm64.h`) should have an `act_x()`
+  handler function. 221/232 link; the 11 gaps are real — actions that share a
+  handler (`ACT_BEGIN_SLIDING`) or are unimplemented placeholders
+  (`ACT_UNKNOWN_0002020E`). Precision matters: the `ACT_1`…`ACT_6` in
+  `model_ids.h` are *course acts*, a different meaning sharing the prefix, and
+  are excluded.
+
+Gaps show up in the worklist tagged `S`; the JSON has `semantic_entities` (the
+summary) and `semantic_findings` (the gaps).
 
 Convention violations appear in the same worklist (tagged `C`, with the reason),
 and in the JSON under `violations` / `conventions` / `uniformity_score`.

@@ -363,20 +363,98 @@ def family_label(sym: Symbol, named: set) -> Optional[str]:
 def family_counts(
     symbols: List[Symbol], min_members: int = MIN_FAMILY_MEMBERS
 ) -> Dict[str, Dict[str, int]]:
-    """Per-family tallies: count, complete (GOOD), and conforming (uniform)."""
+    """Per-family tallies: count and complete (GOOD).
+
+    Note we deliberately do NOT report per-family *uniformity*: a family is a
+    prefix group, so "do its members share the prefix/casing?" is true by
+    construction -- a tautology. Convention is measured per-kind (above) and
+    semantics per-entity (below), where the question isn't circular.
+    """
     named = _named_families(symbols, min_members)
     out: Dict[str, Dict[str, int]] = {}
     for s in symbols:
         label = family_label(s, named)
         if label is None:
             continue
-        d = out.setdefault(label, {"count": 0, "good": 0, "conforming": 0})
+        d = out.setdefault(label, {"count": 0, "good": 0})
         d["count"] += 1
         if s.classification == Classification.GOOD:
             d["good"] += 1
-            if not convention_violation(s):
-                d["conforming"] += 1
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Semantic entities (cross-references, not just prefixes)
+# --------------------------------------------------------------------------- #
+#
+# A prefix family answers "what's it called?"; a *semantic* entity answers "is it
+# wired up?" -- by relating a symbol to its implementation. The check is not
+# tautological because it crosses kinds. Each entity is domain knowledge, so this
+# is a small curated registry. First entity: a Mario action (ACT_X constant) must
+# have an act_x handler function.
+
+
+@dataclass(frozen=True)
+class SemanticFinding:
+    entity: str  # e.g. "Mario action"
+    name: str  # the member missing its link
+    detail: str  # what's missing
+    file: str
+    line: int
+
+
+def _entity_mario_actions(symbols: List[Symbol]):
+    """A Mario action (ACT_X) should have an act_x handler function.
+
+    Scoped to sm64.h: the ACT_* there are Mario's action state machine. (The
+    ACT_1..ACT_6 in model_ids.h are *course acts* -- a different meaning sharing
+    the prefix -- and ACT_FLAG_/GROUP_/ID_ are flag/group sub-families, not
+    actions.) This precision is the point: a prefix alone would conflate them.
+    """
+    funcs = {s.name for s in symbols if s.kind == "function"}
+    actions = [
+        s
+        for s in symbols
+        if s.kind == "constant"
+        and s.file.endswith("sm64.h")
+        and s.name.startswith("ACT_")
+        and not s.name.startswith(("ACT_FLAG_", "ACT_GROUP_", "ACT_ID_"))
+        and s.name != "ACT_UNINITIALIZED"
+    ]
+    findings: List[SemanticFinding] = []
+    linked = 0
+    for s in actions:
+        handler = "act_" + s.name[len("ACT_") :].lower()
+        if handler in funcs:
+            linked += 1
+        else:
+            findings.append(
+                SemanticFinding(
+                    "Mario action", s.name, f"no {handler}() handler", s.file, s.line
+                )
+            )
+    summary = {
+        "entity": "Mario action",
+        "members": len(actions),
+        "linked": linked,
+        "gaps": len(findings),
+        "link": "ACT_X ⟷ act_x() handler",
+    }
+    return summary, findings
+
+
+# Each entry: (symbols) -> (summary dict, [SemanticFinding]).
+SEMANTIC_ENTITIES = [_entity_mario_actions]
+
+
+def semantic_report(symbols: List[Symbol]):
+    summaries = []
+    findings: List[SemanticFinding] = []
+    for check in SEMANTIC_ENTITIES:
+        summary, found = check(symbols)
+        summaries.append(summary)
+        findings.extend(found)
+    return summaries, findings
 
 
 def extract_file(path: Path, rel: str) -> List[Symbol]:
@@ -643,10 +721,22 @@ def print_report(
         ranked = sorted(fams.items(), key=lambda kv: kv[1]["good"] / kv[1]["count"])
         for fam, c in ranked[:top_files]:
             comp = 100 * c["good"] / c["count"]
-            unif = 100 * c["conforming"] / c["good"] if c["good"] else 100.0
+            print(f"  {fam:<16} n={c['count']:<4} complete {comp:4.0f}%")
+
+    # Semantic entities: cross-reference checks (not tautological).
+    summaries, findings = semantic_report(symbols)
+    if summaries:
+        print("\nSemantic entities (implementation cross-references):")
+        for sm in summaries:
+            pct = 100 * sm["linked"] / sm["members"] if sm["members"] else 100.0
             print(
-                f"  {fam:<16} n={c['count']:<4} complete {comp:4.0f}%  uniform {unif:4.0f}%"
+                f"  {sm['entity']:<16} {sm['link']}: "
+                f"{sm['linked']}/{sm['members']} linked ({pct:.0f}%), {sm['gaps']} gaps"
             )
+        for f in findings[:samples]:
+            print(f"    [S] {f.name}  @ {f.file}:{f.line} — {f.detail}")
+        if len(findings) > samples:
+            print(f"    … and {len(findings) - samples} more")
     return score, uscore
 
 
@@ -654,6 +744,7 @@ def to_json(symbols: List[Symbol]) -> dict:
     counts = category_counts(symbols)
     ucounts = uniformity_counts(symbols)
     named = _named_families(symbols, MIN_FAMILY_MEMBERS)
+    semantic_summaries, semantic_findings = semantic_report(symbols)
     return {
         "score": overall_score(counts),
         "categories": {
@@ -689,6 +780,17 @@ def to_json(symbols: List[Symbol]) -> dict:
             and convention_violation(s)
         ],
         "families": family_counts(symbols),
+        "semantic_entities": semantic_summaries,
+        "semantic_findings": [
+            {
+                "entity": f.entity,
+                "name": f.name,
+                "detail": f.detail,
+                "file": f.file,
+                "line": f.line,
+            }
+            for f in semantic_findings
+        ],
     }
 
 

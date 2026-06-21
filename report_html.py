@@ -68,6 +68,7 @@ _TEMPLATE = """<!doctype html>
   .tag.U {{ background: rgba(248,81,73,.18); color: var(--und); }}
   .tag.M {{ background: rgba(210,153,34,.18); color: var(--mal); }}
   .tag.C {{ background: rgba(88,166,255,.18); color: var(--conv); }}
+  .tag.S {{ background: rgba(163,113,247,.18); color: #a371f7; }}
   .kind {{ color: var(--muted); }}
 </style>
 </head>
@@ -88,6 +89,16 @@ _TEMPLATE = """<!doctype html>
   <h2>Uniformity — do those names follow convention?</h2>
   <div class="cats" id="cats-uniform"></div>
 
+  <h2>Semantic entities — are they wired up?</h2>
+  <p class="label">Cross-references, not prefixes: a member is "linked" when its
+  implementation exists. (Not tautological — it crosses kinds.)</p>
+  <table>
+    <thead><tr>
+      <th>entity</th><th>link</th><th>linked</th><th>gaps</th>
+    </tr></thead>
+    <tbody id="sem-rows"></tbody>
+  </table>
+
   <h2>Entities — constant &amp; enum families (grouped by prefix)</h2>
   <div class="controls"><span class="count" id="fam-count"></span></div>
   <table>
@@ -95,7 +106,6 @@ _TEMPLATE = """<!doctype html>
       <th data-fk="family">family</th>
       <th data-fk="count">count</th>
       <th data-fk="complete">completeness</th>
-      <th data-fk="uniform">uniformity</th>
     </tr></thead>
     <tbody id="fam-rows"></tbody>
   </table>
@@ -104,9 +114,10 @@ _TEMPLATE = """<!doctype html>
   <div class="controls">
     <input type="search" id="q" placeholder="filter by name or file…">
     <select id="axis">
-      <option value="">both axes</option>
+      <option value="">all axes</option>
       <option value="completeness">completeness</option>
       <option value="convention">convention</option>
+      <option value="semantic">semantic</option>
     </select>
     <select id="kind"></select>
     <select id="famsel"></select>
@@ -161,11 +172,19 @@ bars('cats-uniform', Object.keys(DATA.conventions || {{}}).map(k => {{
   return [k, c.CONFORMING, c.CONFORMING + c.VIOLATION];
 }}));
 
+// --- semantic entities (cross-references) ---
+const SEM = DATA.semantic_entities || [];
+document.getElementById('sem-rows').innerHTML = SEM.map(e => {{
+  const ratio = e.members ? e.linked / e.members : 1;
+  return `<tr><td class="fam">${{esc(e.entity)}}</td>`
+    + `<td class="reason">${{esc(e.link)}}</td>`
+    + `<td>${{pctCell(ratio)}} <small class="count">${{e.linked}}/${{e.members}}</small></td>`
+    + `<td>${{e.gaps}}</td></tr>`;
+}}).join('') || '<tr><td colspan="4" class="count">none</td></tr>';
+
 // --- entity families table (sortable) ---
 const FAMILIES = Object.entries(DATA.families || {{}}).map(([family, c]) => ({{
-  family, count: c.count,
-  complete: c.count ? c.good / c.count : 1,
-  uniform: c.good ? c.conforming / c.good : 1,
+  family, count: c.count, complete: c.count ? c.good / c.count : 1,
 }}));
 let famKey = 'complete', famDir = 1;
 const famBody = document.getElementById('fam-rows');
@@ -177,12 +196,12 @@ function renderFamilies() {{
   }});
   famBody.innerHTML = FAMILIES.map(f =>
     `<tr><td class="fam">${{esc(f.family)}}</td><td>${{f.count}}</td>`
-    + `<td>${{pctCell(f.complete)}}</td><td>${{pctCell(f.uniform)}}</td></tr>`
+    + `<td>${{pctCell(f.complete)}}</td></tr>`
   ).join('');
 }}
 document.querySelectorAll('th[data-fk]').forEach(th => th.addEventListener('click', () => {{
   const k = th.dataset.fk;
-  if (k === famKey) famDir = -famDir; else {{ famKey = k; famDir = (k === 'family') ? 1 : 1; }}
+  if (k === famKey) famDir = -famDir; else {{ famKey = k; famDir = 1; }}
   renderFamilies();
 }}));
 renderFamilies();
@@ -199,6 +218,11 @@ const rows = [
     tag: 'C', axis: 'convention',
     kind: r.kind, family: r.family || '', name: r.name, file: r.file, line: r.line,
     reason: r.reason,
+  }})),
+  ...(DATA.semantic_findings || []).map(r => ({{
+    tag: 'S', axis: 'semantic',
+    kind: '', family: r.entity, name: r.name, file: r.file, line: r.line,
+    reason: r.detail,
   }})),
 ];
 

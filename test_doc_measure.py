@@ -262,6 +262,35 @@ def test_to_json_has_families_and_row_family():
         assert "family" in row
 
 
+def test_semantic_mario_actions_crossref():
+    src = b"#define ACT_WALKING 0x04\n#define ACT_NO_HANDLER 0x05\nvoid act_walking(void) {}\n"
+    s = m.extract_source(src, "include/sm64.h")
+    summaries, findings = m.semantic_report(s)
+    action = next(x for x in summaries if x["entity"] == "Mario action")
+    assert action["members"] == 2 and action["linked"] == 1 and action["gaps"] == 1
+    names = {f.name for f in findings}
+    assert "ACT_NO_HANDLER" in names and "ACT_WALKING" not in names
+
+
+def test_semantic_excludes_course_acts():
+    # ACT_1..ACT_6 in model_ids.h are course acts, not Mario actions.
+    s = m.extract_source(b"#define ACT_1 (1 << 0)\n", "include/model_ids.h")
+    summaries, _ = m.semantic_report(s)
+    assert next(x for x in summaries if x["entity"] == "Mario action")["members"] == 0
+
+
+def test_to_json_has_semantic_and_no_family_uniformity():
+    d = m.to_json(
+        m.extract_source(
+            b"#define ACT_WALKING 1\nvoid act_walking(void){}\n", "include/sm64.h"
+        )
+    )
+    assert "semantic_entities" in d and "semantic_findings" in d
+    # per-family uniformity was tautological and is gone.
+    if d["families"]:
+        assert "conforming" not in next(iter(d["families"].values()))
+
+
 def test_preproc_blanking_keeps_guarded_code():
     src = b"""
 #ifdef VERSION_JP
